@@ -121,8 +121,8 @@ async fn download(
     remotepath: String, 
     localpath: String,
     window: Window, 
-    app: State<'_, AppState>) -> Result<String, String> {
-    let mut ssh = app.ssh.lock().unwrap();
+    state: State<'_, AppState>) -> Result<String, String> {
+    let mut ssh = state.ssh.lock().unwrap();
     match ssh.scp_download(&remotepath, &localpath, window) {
         Err(e) => Err(e),
         Ok(o) => {
@@ -186,6 +186,9 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
     let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
     let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
     
+    let mut ssh = state.ssh.lock().unwrap();
+    let bytes = ssh.channel_write("ls -l".to_string().as_bytes()).unwrap();
+    
     // stdin
     std::thread::spawn(move || loop {        
         let result = irx.recv().unwrap();
@@ -193,8 +196,37 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
 
         // send to tty
 
+        // let mut buf = vec![0; 4096];
+        // match channel.read(&mut buf) {
+        //     Ok(_) => {
+        //         let s = String::from_utf8(buf).unwrap();
+        //         println!("{}", s);
+        //     }
+        //     Err(e) => {
+        //         if e.kind() != std::io::ErrorKind::WouldBlock {
+        //             println!("{}", e);
+        //         }
+        //     }
+        // }
 
-        otx.send(format!("data from server: {result}")).unwrap();
+        // if !rev.is_empty() {
+        //     match rev.try_recv() {
+        //         Ok(line) => {
+        //             let cmd_string = line + "\n";
+        //             channel.write(cmd_string.as_bytes()).unwrap();
+        //             channel.flush().unwrap();
+        //         }
+
+        //         Err(TryRecvError::Empty) => {
+        //             println!("{}", "empty");
+        //         }
+
+        //         Err(TryRecvError::Disconnected) => {
+        //             println!("{}", "disconnected");
+        //         }
+        //     }
+        // }
+        // //otx.send(format!("data from server: {result}")).unwrap();
         
     });
 

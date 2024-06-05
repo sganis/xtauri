@@ -458,6 +458,20 @@ impl Ssh {
         f.write_all(data.as_bytes()).expect("Cannot write data");
         Ok(())
     }
+    pub fn channel_read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
+        let bytes = match self.channel.as_mut().unwrap().read(buf) {
+            Err(e) => return Err(format!("Cannot read channel: {e}")),
+            Ok(o) => o,
+        };        
+        Ok(bytes)
+    }
+    pub fn channel_write(&mut self, buf: &[u8]) -> Result<usize, String> {
+        let bytes = match self.channel.as_mut().unwrap().write(buf) {
+            Err(e) => return Err(format!("Cannot write channel: {e}")),
+            Ok(o) => o,
+        };        
+        Ok(bytes)
+    }
 }
 
 
