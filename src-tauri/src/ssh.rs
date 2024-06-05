@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Read, BufReader, Write, BufWriter};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
-use ssh2::{Session, Sftp, FileStat};
+use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use super::command;
 
@@ -10,6 +10,7 @@ use super::command;
 pub struct Ssh {
     session : Option<Session>,
     sftp : Option<Sftp>,
+    channel : Option<Channel>,
     host : String,
     user : String,
     password : String,
@@ -25,9 +26,7 @@ struct Payload {
 impl Ssh {
     pub fn new() -> Self {
         Self { ..Default::default() }
-    }
-
-    
+    }  
     pub fn supported_algs() -> String {
         let ssh = Session::new().unwrap();
         println!("hostKey: {:?}", ssh.supported_algs(ssh2::MethodType::HostKey).unwrap());
@@ -165,8 +164,7 @@ impl Ssh {
 
         Ok(tcp.unwrap())
     }
-    pub fn connect_with_password(&mut self, 
-        host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
+    pub fn connect_with_password(&mut self, host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
         
         let tcp = match self._get_tcp(host, port) {
             Err(e) => return Err(e),
@@ -197,8 +195,7 @@ impl Ssh {
         self.password = password.to_string();
         Ok(())
     }
-    pub fn connect_with_key(&mut self, 
-        host: &str, port: i16, user: &str, pkey: &str) -> Result<(), String> {
+    pub fn connect_with_key(&mut self, host: &str, port: i16, user: &str, pkey: &str) -> Result<(), String> {
         let tcp = match self._get_tcp(host, port) {
             Err(e) => return Err(e),
             Ok(o) => o,
@@ -223,8 +220,18 @@ impl Ssh {
             Ok(o) => o,
         };
 
+        let mut channel = match session.channel_session() {
+            Err(e) => return Err(format!("Cannot create channel {e}")),
+            Ok(o) => o,
+        };
+        channel.request_pty("xterm", None, None).unwrap();
+        channel.shell().unwrap();
+
+
+
         self.session = Some(session);
         self.sftp = Some(sftp);
+        self.channel = Some(channel);
         self.host = host.to_string();
         self.user = user.to_string();
         self.private_key = pkey.to_string();
@@ -414,8 +421,7 @@ impl Ssh {
             }
         }
     }
-    pub fn sftp_readdir(&mut self, dirname: &str) 
-    -> Result<Vec<(PathBuf, FileStat)>, String> {
+    pub fn sftp_readdir(&mut self, dirname: &str) -> Result<Vec<(PathBuf, FileStat)>, String> {
         let path = Path::new(dirname);
         let files: Vec<(PathBuf, FileStat)> = match self.sftp.as_ref().unwrap().readdir(path) {
             Err(e) => return Err(format!("Cannot read directory {dirname}: {e}")),

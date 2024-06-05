@@ -8,6 +8,7 @@ mod settings;
 mod ssh;
 mod command;
 
+use flume::{Sender, Receiver};
 use tauri::{Manager, Window};
 use settings::Settings;
 use std::sync::Mutex;
@@ -23,9 +24,11 @@ extern crate objc;
 extern crate webkit2gtk;
 
 #[derive(Default)]
-struct App {
+struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
+    itx: Option<Mutex<Sender<String>>>,
+    irx: Option<Mutex<Receiver<String>>>,
 }
 
 #[tauri::command]
@@ -38,7 +41,7 @@ fn write_settings(settings: Settings) -> Result<(), String> {
     settings::write_settings(settings)
 }
 #[tauri::command]
-fn connect_with_password(settings: Settings, app: State<'_,App>) -> Result<(), String> {
+fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
     let mut _ssh = ssh::Ssh::new();
     match _ssh.connect_with_password(
         settings.server.as_str(), 
@@ -50,9 +53,9 @@ fn connect_with_password(settings: Settings, app: State<'_,App>) -> Result<(), S
         },
         Ok(_) => {
             write_settings(settings).expect("Cannot write settings");
-            let mut ssh = app.ssh.lock().unwrap();
+            let mut ssh = state.ssh.lock().unwrap();
             *ssh = _ssh;
-            *app.connected.lock().unwrap() = true;
+            *state.connected.lock().unwrap() = true;
             println!("Connected");
             let output = ssh.run("whoami").unwrap();
             println!("{}", output);
@@ -62,7 +65,7 @@ fn connect_with_password(settings: Settings, app: State<'_,App>) -> Result<(), S
 }
 
 #[tauri::command]
-fn connect_with_key(settings: Settings, app: State<'_,App>) -> Result<(), String> {
+fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
     let mut _ssh = ssh::Ssh::new();
     let mut pkey = String::new();
     
@@ -81,9 +84,9 @@ fn connect_with_key(settings: Settings, app: State<'_,App>) -> Result<(), String
         },        
         Ok(_) => {
             write_settings(settings).expect("Cannot write settings");
-            let mut ssh = app.ssh.lock().unwrap();
+            let mut ssh = state.ssh.lock().unwrap();
             *ssh = _ssh;
-            *app.connected.lock().unwrap() = true;
+            *state.connected.lock().unwrap() = true;
             println!("Connected");
             let output = ssh.run("whoami").unwrap();
             println!("{}", output);
@@ -93,7 +96,7 @@ fn connect_with_key(settings: Settings, app: State<'_,App>) -> Result<(), String
 }
 
 #[tauri::command]
-fn disconnect(app: State<App>) -> Result<(), String> {
+fn disconnect(app: State<AppState>) -> Result<(), String> {
     let mut ssh = app.ssh.lock().unwrap();
     ssh.disconnect()   
 }
@@ -108,8 +111,8 @@ async fn setup_ssh(settings: Settings) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn ssh_run(command: String, app: State<'_,App>) -> Result<String, String> {
-    let mut ssh = app.ssh.lock().unwrap();
+async fn ssh_run(command: String, state: State<'_,AppState>) -> Result<String, String> {
+    let mut ssh = state.ssh.lock().unwrap();
     ssh.run(&command)
 }
 
@@ -118,7 +121,7 @@ async fn download(
     remotepath: String, 
     localpath: String,
     window: Window, 
-    app: State<'_, App>) -> Result<String, String> {
+    app: State<'_, AppState>) -> Result<String, String> {
     let mut ssh = app.ssh.lock().unwrap();
     match ssh.scp_download(&remotepath, &localpath, window) {
         Err(e) => Err(e),
@@ -134,8 +137,8 @@ async fn upload(
     localpath: String,
     remotepath: String, 
     window: Window,
-    app: State<'_,App>) -> Result<String, String> {
-    let mut ssh = app.ssh.lock().unwrap();
+    state: State<'_,AppState>) -> Result<String, String> {
+    let mut ssh = state.ssh.lock().unwrap();
     match ssh.scp_upload(&localpath, &remotepath, window) {
         Err(e) => Err(e),
         Ok(o) => {
@@ -170,20 +173,58 @@ fn zoom_window(window: tauri::Window, scale_factor: f64) {
 }
 
 #[tauri::command]
-async fn send_key(key: String, app: tauri::AppHandle) -> Result<(), String> {
+async fn send_key(key: String, state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
     println!("key: {key}");
-    app.emit_all("send-data", "output from rust".to_string()).unwrap();
+    let itx = state.itx.as_ref().unwrap().lock().unwrap();
+    itx.send(key).unwrap();
+    //app.emit_all("send-data", "output from rust".to_string()).unwrap();
     Ok(())
 }
 
+#[tauri::command]
+async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
+    let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    
+    // stdin
+    std::thread::spawn(move || loop {        
+        let result = irx.recv().unwrap();
+        println!("irx: {result}");
+
+        // send to tty
+
+
+        otx.send(format!("data from server: {result}")).unwrap();
+        
+    });
+
+    std::thread::spawn(move || loop {        
+        let result = orx.recv().unwrap();
+        println!("orx: {result}");        
+    });
+
+    Ok(())
+
+}
+
 fn main() {
-    tauri::Builder::default()
-        .manage(App::default())
+
+    tauri::Builder::default()     
+        .setup(|app| {
+            app.manage(AppState::default());
+
+            //app.emit_all("send-data", "output from rust".to_string()).unwrap();
+            //let handle = app.handle();
+            //let state: tauri::State<AppState> = handle.state();
+            //*state.itx.as_ref().unwrap().lock().unwrap() = itx;
+            //*state.irx.as_ref().unwrap().lock().unwrap() = irx;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             read_settings, write_settings,
-            connect_with_key, connect_with_password, disconnect, 
-            ssh_run, download, upload, setup_ssh,
-            send_key,
+            connect_with_key, connect_with_password, 
+            ssh_run, download, upload, setup_ssh, disconnect,
+            open_terminal, send_key,
             zoom_window,    
         ])
         .run(tauri::generate_context!())
