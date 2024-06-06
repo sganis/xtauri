@@ -11,7 +11,7 @@ mod command;
 use flume::{Sender, Receiver};
 use tauri::{Manager, Window};
 use settings::Settings;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 use std::io::{Read, BufReader, Write, BufWriter};
 use std::{thread, time};
@@ -30,7 +30,7 @@ struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
     itx: Option<Mutex<Sender<String>>>,
-    irx: Option<Mutex<Receiver<String>>>,
+    orx: Option<Mutex<Receiver<String>>>,
 }
 
 #[tauri::command]
@@ -179,102 +179,89 @@ async fn send_key(key: String, state: State<'_,AppState>, app: tauri::AppHandle)
     println!("key: {key}");
     let itx = state.itx.as_ref().unwrap().lock().unwrap();
     itx.send(key).unwrap();
+
+    
+    // let result = orx.recv().unwrap();
+    // println!("### stdout:\n{result}\n###");
+
     //app.emit_all("send-data", "output from rust".to_string()).unwrap();
     Ok(())
 }
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
-    //let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    //let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    
-    let mut ssh = state.ssh.lock().unwrap();
-    ssh.channel_shell().unwrap();
+    let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    {
+        let mut ssh = state.ssh.lock().unwrap();
+        ssh.channel_shell().unwrap();
+    }
+
     // wirte
     {
-        let mut channel = ssh.channel.as_ref().unwrap().lock().unwrap();
-        let bytes = channel.write("ls -l /\n".to_string().as_bytes()).unwrap();
-        println!("bytes written: {bytes}");
+        let ssh = state.ssh.lock().unwrap();
+        let channel = ssh.channel.as_ref().unwrap();
+        let channel = Arc::clone(&channel);
+        thread::spawn(move || loop {
+            let cmd = irx.recv().unwrap();
+            println!("command: {cmd}");
+            let mut channel = channel.lock().unwrap();
+            channel.write(cmd.as_bytes()).unwrap();
+            //channel.flush().unwrap();                
+        });
     }
+
     // read
     {
-        let mut channel = ssh.channel.as_ref().unwrap().lock().unwrap();        
-        let mut buf = vec![0; 4096];
-        let mut bytes_read = 0;
-        loop {
-            match channel.read(&mut buf) {
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        println!("blocking reading, trying again");
-                        thread::sleep(time::Duration::from_millis(200));
-                    } else {
-                        return Err(format!("Cannot read channel: {e}"));        
+        let ssh = state.ssh.lock().unwrap();
+        let channel = ssh.channel.as_ref().unwrap();
+        let channel = Arc::clone(&channel);
+        thread::spawn(move || loop {
+            let mut channel = channel.lock().unwrap();
+            let mut buf = vec![0; 1000];
+            loop {
+                match channel.read(&mut buf) {
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            //println!("blocking reading, trying again");
+                            thread::sleep(time::Duration::from_millis(200));
+                        } else {
+                            println!("Cannot read channel: {e}");   
+                            assert!(false);     
+                            // return Err(format!("Cannot read channel: {e}"));        
+                        }
+                    },
+                    Ok(n) => { 
+                        if n > 0 {
+                            let result = String::from_utf8_lossy(&buf).to_string();
+                            println!("stdout: {result}");
+                            //otx.send(result).unwrap();
+                        } else {
+                            assert!(n == 0);
+                            println!("bytes es zero: {n}"); 
+                            break;
+                        }
                     }
-                },
-                Ok(n) => { 
-                    if n > 0 {
-                        bytes_read += n;
-                        println!("bytes read: {n}");
-                        let s = String::from_utf8_lossy(&buf);
-                        println!("result: {s}");                        
-                    } else {
-                        assert!(n == 0);
-                        break;
-                    }
-                }
-            };
-        };     
-
-
+                };
+            };                 
+        });
+        
+        //state.itx = Some(Mutex::new(itx));
+        //*state.orx.as_ref().unwrap().lock().unwrap() = orx;
+        itx.send("hostname\n".to_string()).unwrap();
+        thread::sleep(time::Duration::from_millis(2000));
+        itx.send("whoami\n".to_string()).unwrap();
+        thread::sleep(time::Duration::from_millis(2000));
+        itx.send("ls /\n".to_string()).unwrap();
+        thread::sleep(time::Duration::from_millis(2000));
+        itx.send("ls -l /\n".to_string()).unwrap();
+        thread::sleep(time::Duration::from_millis(2000));
+        
+        
 
     }
 
     
-    // stdin
-    //std::thread::spawn(move || loop {        
-        //let result = irx.recv().unwrap();
-       // println!("irx: {result}");
-
-        // send to tty
-
-        // let mut buf = vec![0; 4096];
-        // match channel.read(&mut buf) {
-        //     Ok(_) => {
-        //         let s = String::from_utf8(buf).unwrap();
-        //         println!("{}", s);
-        //     }
-        //     Err(e) => {
-        //         if e.kind() != std::io::ErrorKind::WouldBlock {
-        //             println!("{}", e);
-        //         }
-        //     }
-        // }
-
-        // if !rev.is_empty() {
-        //     match rev.try_recv() {
-        //         Ok(line) => {
-        //             let cmd_string = line + "\n";
-        //             channel.write(cmd_string.as_bytes()).unwrap();
-        //             channel.flush().unwrap();
-        //         }
-
-        //         Err(TryRecvError::Empty) => {
-        //             println!("{}", "empty");
-        //         }
-
-        //         Err(TryRecvError::Disconnected) => {
-        //             println!("{}", "disconnected");
-        //         }
-        //     }
-        // }
-        // //otx.send(format!("data from server: {result}")).unwrap();
-        
-   // });
-
-    // std::thread::spawn(move || loop {        
-    //     let result = orx.recv().unwrap();
-    //     println!("orx: {result}");        
-    // });
 
     Ok(())
 
