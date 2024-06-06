@@ -13,6 +13,8 @@ use tauri::{Manager, Window};
 use settings::Settings;
 use std::sync::Mutex;
 use tauri::State;
+use std::io::{Read, BufReader, Write, BufWriter};
+use std::{thread, time};
 // use serde::{Deserialize, Serialize};
 // use chrono::prelude::{DateTime, NaiveDateTime, Utc};
 
@@ -187,21 +189,44 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
     //let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
     
     let mut ssh = state.ssh.lock().unwrap();
-    //ssh.channel_flush().unwrap();
+    ssh.channel_shell().unwrap();
+    // wirte
+    {
+        let mut channel = ssh.channel.as_ref().unwrap().lock().unwrap();
+        let bytes = channel.write("ls -l /\n".to_string().as_bytes()).unwrap();
+        println!("bytes written: {bytes}");
+    }
+    // read
+    {
+        let mut channel = ssh.channel.as_ref().unwrap().lock().unwrap();        
+        let mut buf = vec![0; 4096];
+        let mut bytes_read = 0;
+        loop {
+            match channel.read(&mut buf) {
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        println!("blocking reading, trying again");
+                        thread::sleep(time::Duration::from_millis(200));
+                    } else {
+                        return Err(format!("Cannot read channel: {e}"));        
+                    }
+                },
+                Ok(n) => { 
+                    if n > 0 {
+                        bytes_read += n;
+                        println!("bytes read: {n}");
+                        let s = String::from_utf8_lossy(&buf);
+                        println!("result: {s}");                        
+                    } else {
+                        assert!(n == 0);
+                        break;
+                    }
+                }
+            };
+        };     
 
-    let bytes = ssh.channel_write("ls -l /\n".to_string().as_bytes()).unwrap();
-    println!("bytes written: {bytes}");
 
-    let mut buf = vec![0; 4096];
-    match ssh.channel_read(&mut buf) {
-        Ok(_) => {
-            let s = String::from_utf8(buf).unwrap();
-            println!("result:\n{s}");
-            println!("done reading");
-        }
-        Err(e) => {
-            println!("error reading channel: {}", e);            
-        }
+
     }
 
     

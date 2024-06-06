@@ -5,13 +5,14 @@ use std::time::Duration;
 use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
+use std::sync::Mutex;
 use super::command;
 
 #[derive(Default)]
 pub struct Ssh {
     session : Option<Session>,
     sftp : Option<Sftp>,
-    channel : Option<Channel>,
+    pub channel : Option<Mutex<Channel>>,
     host : String,
     user : String,
     password : String,
@@ -221,18 +222,10 @@ impl Ssh {
             Ok(o) => o,
         };
 
-        let mut channel = match session.channel_session() {
-            Err(e) => return Err(format!("Cannot create channel {e}")),
-            Ok(o) => o,
-        };
-        channel.request_pty("xterm-256color", None, None).unwrap();
-        channel.shell().unwrap();
-
         session.set_blocking(false);
 
         self.session = Some(session);
         self.sftp = Some(sftp);
-        self.channel = Some(channel);
         self.host = host.to_string();
         self.user = user.to_string();
         self.private_key = pkey.to_string();
@@ -496,80 +489,73 @@ impl Ssh {
         f.write_all(data.as_bytes()).expect("Cannot write data");
         Ok(())
     }
+    pub fn channel_shell(&mut self) -> Result<(), String> {
+        self.session.as_ref().unwrap().set_blocking(true);
+        let mut channel = self.session.as_ref().unwrap().channel_session().unwrap();
+        channel.request_pty("xterm", None, None).unwrap();
+        channel.shell().unwrap();
+        self.channel = Some(Mutex::new(channel));
+        self.session.as_ref().unwrap().set_blocking(false);
+        Ok(())
+    }
     pub fn channel_read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
 
-        let channel = self.channel.as_mut().unwrap();
-        let bytes = loop {
-            match channel.read(buf) {
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        println!("blocking reading, trying again");
-                    } else {
-                        return Err(format!("Cannot read channel: {e}"));        
-                    }
-                },
-                Ok(n) => { 
-                    if n > 0 {
-                        // loop {
-                        //     let mut s = String::new();                                    
-                        //     match channel.stderr().read_to_string(&mut s) {
-                        //         Err(e) => {
-                        //             if e.kind() == std::io::ErrorKind::WouldBlock {
-                        //                 println!("blocking reading stderr, trying again");
-                        //             } else {
-                        //                 return Err(format!("Cannot read stderr channel: {e}"));        
-                        //             }               
-                        //         },
-                        //         Ok(_) => {
-                        //             if !s.trim().is_empty() {
-                        //                 return Err(format!("stderr: {s}"));
-                        //             };
-                        //             break;
-                        //         }
-                        //     }
-                        //     thread::sleep(time::Duration::from_millis(200));
-                        // }
-                        println!("bytes read: {n}");
-                        let s = String::from_utf8_lossy(buf);
-                        println!("result: {s}");
-                        break n;
-                    } else {
-                        println!("0 bytes read, trying again");
-                    }
-                }
-            };
-        };     
-        Ok(bytes)
+        let channel = self.channel.as_ref().unwrap();
+
+        // let bytes = loop {
+        //     match channel.read(buf) {
+        //         Err(e) => {
+        //             if e.kind() == std::io::ErrorKind::WouldBlock {
+        //                 println!("blocking reading, trying again");
+        //             } else {
+        //                 return Err(format!("Cannot read channel: {e}"));        
+        //             }
+        //         },
+        //         Ok(n) => { 
+        //             if n > 0 {
+        //                 println!("bytes read: {n}");
+        //                 let s = String::from_utf8_lossy(buf);
+        //                 println!("result: {s}");
+        //                 break n;
+        //             } else {
+        //                 println!("0 bytes read, trying again");
+        //             }
+        //         }
+        //     };
+        // };     
+        // Ok(bytes)
+        Ok(0)
     }
     pub fn channel_write(&mut self, buf: &[u8]) -> Result<usize, String> {
 
-        let channel = self.channel.as_mut().unwrap();
+        // let channel = self.channel.as_mut().unwrap();
 
-        let bytes = loop {
-            match channel.write(buf) {
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        println!("blocking writing, trying again");
-                    } else {
-                        return Err(format!("Cannot write channel: {e}"));        
-                    }
-                },
-                Ok(n) => { 
-                    if n > 0 {
-                        break n;
-                    } else {
-                        println!("0 bytes written, trying again");
-                    }
-                }
-            }; 
-        };
-        channel.flush().unwrap();
-        Ok(bytes)
+        // let bytes = loop {
+        //     match channel.write(buf) {
+        //         Err(e) => {
+        //             if e.kind() == std::io::ErrorKind::WouldBlock {
+        //                 println!("blocking writing, trying again");
+        //             } else {
+        //                 return Err(format!("Cannot write channel: {e}"));        
+        //             }
+        //         },
+        //         Ok(n) => { 
+        //             if n > 0 {
+        //                 break n;
+        //             } else {
+        //                 println!("0 bytes written, trying again");
+        //             }
+        //         }
+        //     }; 
+        // };
+        // channel.flush().unwrap();
+        // Ok(bytes)
+        Ok(0)
     }
     pub fn channel_flush(&mut self) -> Result<(), String> {
 
-        let channel = self.channel.as_mut().unwrap();
-        channel.flush().unwrap();
+        // let channel = self.channel.as_mut().unwrap();
+        // channel.flush().unwrap();
         Ok(())
     }
 }
