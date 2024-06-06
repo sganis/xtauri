@@ -187,12 +187,25 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
     //let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
     
     let mut ssh = state.ssh.lock().unwrap();
-    //ssh.channel_flush().unwrap();
+    ssh.channel_flush().unwrap();
 
-    let bytes = ssh.channel_write("ls -l /\n".to_string().as_bytes()).unwrap();
+
+    // let mut buf = vec![0; 1000];
+    // match ssh.channel_read(&mut buf) {
+    //     Ok(_) => {
+    //         let s = String::from_utf8(buf).unwrap();
+    //         println!("result:\n{s}");
+    //         println!("### done reading");
+    //     }
+    //     Err(e) => {
+    //         println!("error reading channel: {}", e);            
+    //     }
+    // }
+
+    let bytes = ssh.channel_write("hostname\n".to_string().as_bytes()).unwrap();
     println!("bytes written: {bytes}");
 
-    let mut buf = vec![0; 4096];
+    let mut buf = vec![0; 1000];
     match ssh.channel_read(&mut buf) {
         Ok(_) => {
             let s = String::from_utf8(buf).unwrap();

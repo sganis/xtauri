@@ -226,9 +226,13 @@ impl Ssh {
             Ok(o) => o,
         };
         channel.request_pty("xterm-256color", None, None).unwrap();
+        channel.handle_extended_data(ssh2::ExtendedData::Merge).unwrap();
         channel.shell().unwrap();
+        if !channel.eof() {
+            println!("channel created but not eof");
+        }
 
-        session.set_blocking(false);
+        //session.set_blocking(false);
 
         self.session = Some(session);
         self.sftp = Some(sftp);
@@ -499,46 +503,38 @@ impl Ssh {
     pub fn channel_read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
 
         let channel = self.channel.as_mut().unwrap();
+        let mut bytes_read = 0;
+        let mut result = String::new();
+
         let bytes = loop {
+            println!("loop: eof: {}", channel.eof());
+            
             match channel.read(buf) {
                 Err(e) => {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         println!("blocking reading, trying again");
+                        thread::sleep(time::Duration::from_millis(200));
                     } else {
                         return Err(format!("Cannot read channel: {e}"));        
                     }
                 },
                 Ok(n) => { 
-                    if n > 0 {
-                        // loop {
-                        //     let mut s = String::new();                                    
-                        //     match channel.stderr().read_to_string(&mut s) {
-                        //         Err(e) => {
-                        //             if e.kind() == std::io::ErrorKind::WouldBlock {
-                        //                 println!("blocking reading stderr, trying again");
-                        //             } else {
-                        //                 return Err(format!("Cannot read stderr channel: {e}"));        
-                        //             }               
-                        //         },
-                        //         Ok(_) => {
-                        //             if !s.trim().is_empty() {
-                        //                 return Err(format!("stderr: {s}"));
-                        //             };
-                        //             break;
-                        //         }
-                        //     }
-                        //     thread::sleep(time::Duration::from_millis(200));
-                        // }
-                        println!("bytes read: {n}");
-                        let s = String::from_utf8_lossy(buf);
-                        println!("result: {s}");
-                        break n;
+                    println!("n: {n}");
+                    if n > 0 {         
+                        result.push_str(&String::from_utf8_lossy(buf).to_string());
+                        bytes_read += n;                
+                        println!("bytes: {bytes_read}"); 
+                        println!("result: {result}");                         
                     } else {
-                        println!("0 bytes read, trying again");
+                        println!("0 bytes read, done");
+                        break bytes_read;
                     }
                 }
             };
-        };     
+        };  
+
+        println!("### Bytes: {bytes}\nResult:\n{result}\n###");
+
         Ok(bytes)
     }
     pub fn channel_write(&mut self, buf: &[u8]) -> Result<usize, String> {
