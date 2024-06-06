@@ -183,16 +183,32 @@ async fn send_key(key: String, state: State<'_,AppState>, app: tauri::AppHandle)
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
-    let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    //let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    //let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
     
     let mut ssh = state.ssh.lock().unwrap();
-    let bytes = ssh.channel_write("ls -l".to_string().as_bytes()).unwrap();
+    //ssh.channel_flush().unwrap();
+
+    let bytes = ssh.channel_write("ls -l /\n".to_string().as_bytes()).unwrap();
+    println!("bytes written: {bytes}");
+
+    let mut buf = vec![0; 4096];
+    match ssh.channel_read(&mut buf) {
+        Ok(_) => {
+            let s = String::from_utf8(buf).unwrap();
+            println!("result:\n{s}");
+            println!("done reading");
+        }
+        Err(e) => {
+            println!("error reading channel: {}", e);            
+        }
+    }
+
     
     // stdin
-    std::thread::spawn(move || loop {        
-        let result = irx.recv().unwrap();
-        println!("irx: {result}");
+    //std::thread::spawn(move || loop {        
+        //let result = irx.recv().unwrap();
+       // println!("irx: {result}");
 
         // send to tty
 
@@ -228,12 +244,12 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
         // }
         // //otx.send(format!("data from server: {result}")).unwrap();
         
-    });
+   // });
 
-    std::thread::spawn(move || loop {        
-        let result = orx.recv().unwrap();
-        println!("orx: {result}");        
-    });
+    // std::thread::spawn(move || loop {        
+    //     let result = orx.recv().unwrap();
+    //     println!("orx: {result}");        
+    // });
 
     Ok(())
 

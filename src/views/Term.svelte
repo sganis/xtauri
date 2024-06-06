@@ -17,6 +17,9 @@
 
     onMount(async () => {
         //console.log('term mounted');
+
+        await invoke('open_terminal');
+        
         term = new Terminal({ 
             cursorBlink: true, 
             convertEol: true,            
@@ -64,7 +67,6 @@
     });
 
 </script>
-
 
 <div class="d-flex flex-column flex-grow-1 term-container border-red h100">
     <div class="terminal border-yellow" bind:this={termEl} />
