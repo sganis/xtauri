@@ -19,7 +19,7 @@
     onMount(async () => {
         //console.log('term mounted');
 
-        await invoke('open_terminal');
+       
         
         term = new Terminal({ 
             cursorBlink: true, 
@@ -36,35 +36,47 @@
         term.open(termEl);
         fit.fit();
 
-        term.onData(async data => {
-            command += data;
-            //if (data === '\r') {
-                //term.write('\n');
-            //}
-            if (data === '\r') {
-                term.write('\n$ ');
-                try {                
-                    command = command.trim();
-                    if (command.length > 0) {
-                        command = `sh -c "${command}"`
-                        let r = await invoke('ssh_run', {command});      
-                        console.log(r);      
-                        term.write(r);
-                        term.write('\n$ ');
-                    }
-                } catch(e) {
-                    term.write('\x1b[1;31m ' + e + '\x1b[37m\n$ ');
-
-                    console.log(e);
-                }
-                command = '';
-            } else {
-                term.write(data);
+        term.onData(async (data) => {
+            const code = data.charCodeAt(0);
+            if (code == 13 || code == 10) { // CR
+            
             }
+            await invoke("send_key", {key: data});
         });
+
+        // term.onData(async data => {
+        //     if (data === '\r') {                
+        //         term.write('\n$ ');                
+        //     } else {
+        //         //term.write(data);
+        //     }
+        //     await invoke("send_key", {key: data});
+        //     //command += data;            
+        //     // if (data === '\r') {
+        //     //     term.write('\n$ ');
+        //     //     try {                
+        //     //         command = command.trim();
+        //     //         if (command.length > 0) {
+        //     //             command = `sh -c "${command}"`
+        //     //             let r = await invoke('ssh_run', {command});      
+        //     //             console.log(r);      
+        //     //             term.write(r);
+        //     //             term.write('\n$ ');
+        //     //         }
+        //     //     } catch(e) {
+        //     //         term.write('\x1b[1;31m ' + e + '\x1b[37m\n$ ');
+
+        //     //         console.log(e);
+        //     //     }
+        //     //     command = '';
+        //     // } else {
+        //     //     term.write(data);
+        //     // }
+        // });
+
         term.onKey((key) => {
             
-            console.log('onKey: ', key);
+            //console.log('onKey: ', key);
             //await invoke('send_key', key);            
         });
         term.onLineFeed (async () => {
@@ -78,10 +90,11 @@
             console.log('onSelectionChange');
         });
 
-        appWindow.listen("send-data", (event) => {
-            console.log('data: ', event)
+        appWindow.listen("terminal-output", ({event, payload}) => {
+            console.log('data: ', payload);
+            term.write(payload.output);
         })
-    
+        await invoke('open_terminal');
 
     });
 

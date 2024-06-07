@@ -29,8 +29,13 @@ extern crate webkit2gtk;
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
-    itx: Option<Mutex<Sender<String>>>,
-    orx: Option<Mutex<Receiver<String>>>,
+    itx: Mutex<Option<Sender<String>>>,
+}
+
+// the payload type must implement `Serialize` and `Clone`.
+#[derive(Clone, serde::Serialize)]
+struct Payload {
+  output: Vec::<u8>,
 }
 
 #[tauri::command]
@@ -175,25 +180,22 @@ fn zoom_window(window: tauri::Window, scale_factor: f64) {
 }
 
 #[tauri::command]
-async fn send_key(key: String, state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
+async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
     println!("key: {key}");
-    let itx = state.itx.as_ref().unwrap().lock().unwrap();
-    itx.send(key).unwrap();
-
-    
-    // let result = orx.recv().unwrap();
-    // println!("### stdout:\n{result}\n###");
-
-    //app.emit_all("send-data", "output from rust".to_string()).unwrap();
+    let mutex = state.itx.lock().unwrap();
+    mutex.as_ref().unwrap().send(key).unwrap();
     Ok(())
 }
 
 
 #[tauri::command]
-async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
+async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
     let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
     let (id_tx, id_rx): (Sender<i32>, Receiver<i32>) = flume::unbounded();
     
+    
+    //app.emit_all("terminal-output", Payload {output: "testing event".into()}).unwrap();                          
+
     {
         let mut ssh = state.ssh.lock().unwrap();
         ssh.channel_shell().unwrap();
@@ -213,13 +215,15 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
                     println!("{:?}: command: {cmd}", thread::current().id());
                     let mut writer = writer.lock().unwrap();
                     writer.write(cmd.as_bytes()).unwrap();
-                    // writer.flush().unwrap();  
+                    if cmd == "\n" || cmd == "\r" {
+                        writer.flush().unwrap();  
+                    }
                     i += 1;              
                     id_tx.send(i).unwrap();                
                     println!("{:?}: cmd id sent: {i}", thread::current().id());
                 },
                 Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(200));                     
+                    thread::sleep(time::Duration::from_millis(10));                     
                 }
                 Err(e) => {
                     println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
@@ -243,31 +247,37 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
                     println!("{:?}: running cmd id {cmd_id}...", thread::current().id());
                     let mut buf = vec![0; 4096];
                     let mut reader = reader.lock().unwrap();
-                    
-                    match reader.read(&mut buf) {  
-                        Ok(0) => {
-                            print!("zero return");
-                            // break;
-                        },                          
-                        Ok(n) => { 
-                            let result = String::from_utf8(buf[0..n].to_vec()).unwrap();
-                            print!("result: \n{result}");                            
-                        },
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                println!("blocking reading, trying again");
-                                break;
-                                // thread::sleep(time::Duration::from_millis(200));
-                            } else {
-                                println!("Cannot read channel: {e}");   
-                                assert!(false);     
-                                // return Err(format!("Cannot read channel: {e}"));        
-                            }
-                        },
-                    };                    
+                    //loop {
+                        match reader.read(&mut buf) {                                                      
+                            Ok(n) => { 
+                                if n == 0 {
+                                    println!("read is ZERO");
+                                    break;
+                                }
+                                println!("Stdout: {:?}", &buf[0..n]);
+                                let result = match String::from_utf8(buf[0..n].to_vec()) {
+                                    Ok(o) => o,
+                                    Err(e) => panic!("invalid utf-8 sequence: {}", e)
+                                };
+                                println!("result ({n}):\n{}", result.clone());  
+                                app.emit_all("terminal-output", Payload {output: buf[0..n].to_vec()}).unwrap();                                 
+                            },
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::WouldBlock {
+                                    println!("blocking reading, trying again");
+                                    break;
+                                    // thread::sleep(time::Duration::from_millis(200));
+                                } else {
+                                    println!("Cannot read channel: {e}");   
+                                    assert!(false);     
+                                    // return Err(format!("Cannot read channel: {e}"));        
+                                }
+                            },
+                        };
+                    //}                    
                 },
                 Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(200));                     
+                    thread::sleep(time::Duration::from_millis(10));                     
                 }
                 Err(e) => {
                     println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
@@ -276,10 +286,14 @@ async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
             }
         });
 
-        itx.send("hostname\n".to_string()).unwrap();
-        thread::sleep(time::Duration::from_millis(1000));
-        itx.send("ls -l /\n".to_string()).unwrap();
-        thread::sleep(time::Duration::from_millis(1000));
+        *state.itx.lock().unwrap() = Some(itx);
+        //let mutex = state.itx.lock().unwrap();
+        //mutex.as_ref().unwrap().send("\n".to_string()).unwrap();
+
+        // itx.send("hostname\n".to_string()).unwrap();
+        // thread::sleep(time::Duration::from_millis(1000));
+        // itx.send("ls -l /\n".to_string()).unwrap();
+        // thread::sleep(time::Duration::from_millis(1000));
         
         
 
