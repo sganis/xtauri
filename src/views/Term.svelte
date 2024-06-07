@@ -14,11 +14,12 @@
     
     let termEl;
     let term;
+    let command = '';
 
     onMount(async () => {
         //console.log('term mounted');
 
-        await invoke('open_terminal');
+        //await invoke('open_terminal');
         
         term = new Terminal({ 
             cursorBlink: true, 
@@ -35,22 +36,40 @@
         term.open(termEl);
         fit.fit();
 
-        term.onData(data => {
-            //console.log(data);            
+        term.onData(async data => {
+            command += data;
+            //if (data === '\r') {
+                //term.write('\n');
+            //}
             if (data === '\r') {
-                console.log('enter')
-                term.write('\n');
-                term.write('$ ');
+                term.write('\n$ ');
+                try {                
+                    command = command.trim();
+                    if (command.length > 0) {
+                        command = `sh -c "${command}"`
+                        let r = await invoke('ssh_run', {command});      
+                        console.log(r);      
+                        term.write(r);
+                        term.write('\n$ ');
+                    }
+                } catch(e) {
+                    term.write('\x1b[1;31m ' + e + '\x1b[37m\n$ ');
+
+                    console.log(e);
+                }
+                command = '';
             } else {
                 term.write(data);
             }
         });
-        term.onKey(async (key) => {
+        term.onKey((key) => {
+            
             console.log('onKey: ', key);
-            await invoke('send_key', key);            
+            //await invoke('send_key', key);            
         });
-        term.onLineFeed (() => {
-            console.log('onLineFeed');
+        term.onLineFeed (async () => {
+            // console.log('onLineFeed');
+            
         });
         term.onScroll(n => {
             console.log('onScroll: ', n);
@@ -68,8 +87,8 @@
 
 </script>
 
-<div class="d-flex flex-column flex-grow-1 term-container border-red h100">
-    <div class="terminal border-yellow" bind:this={termEl} />
+<div class="d-flex flex-column flex-grow-1 term-container h100">
+    <div class="terminal" bind:this={termEl} />
 </div>
 
 

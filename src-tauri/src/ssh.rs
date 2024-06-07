@@ -222,7 +222,7 @@ impl Ssh {
             Ok(o) => o,
         };
 
-        session.set_blocking(false);
+        //session.set_blocking(false);
 
         self.session = Some(session);
         self.sftp = Some(sftp);
@@ -491,12 +491,12 @@ impl Ssh {
     }
     pub fn channel_shell(&mut self) -> Result<(), String> {
         let session = self.session.as_ref().unwrap();
-        session.set_blocking(true);
+        //session.set_blocking(true);
         let mut channel = session.channel_session().unwrap();
         channel.request_pty("xterm", None, None).unwrap();
         channel.shell().unwrap();
         self.channel = Some(Arc::new(Mutex::new(channel)));
-        session.set_blocking(false);
+        //session.set_blocking(false);
         Ok(())
     }
     // pub fn channel_read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
