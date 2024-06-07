@@ -19,7 +19,7 @@
     onMount(async () => {
         //console.log('term mounted');
 
-        //await invoke('open_terminal');
+        await invoke('open_terminal');
         
         term = new Terminal({ 
             cursorBlink: true, 

@@ -188,18 +188,12 @@ async fn send_key(key: String, state: State<'_,AppState>, app: tauri::AppHandle)
     Ok(())
 }
 
+
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>) -> Result<(), String> {
-
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn open_terminal_2(state: State<'_,AppState>) -> Result<(), String> {
     let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    let (otx, orx): (Sender<String>, Receiver<String>) = flume::unbounded();
     let (id_tx, id_rx): (Sender<i32>, Receiver<i32>) = flume::unbounded();
+    
     {
         let mut ssh = state.ssh.lock().unwrap();
         ssh.channel_shell().unwrap();
@@ -209,18 +203,28 @@ async fn open_terminal_2(state: State<'_,AppState>) -> Result<(), String> {
     {
         let ssh = state.ssh.lock().unwrap();
         let channel = ssh.channel.as_ref().unwrap();
-        let channel = Arc::clone(&channel);
+        let writer = Arc::clone(&channel);
         let mut i = 0;
+
         thread::spawn(move || loop {
-            println!("{:?}: waiting to recv command...", thread::current().id());
-            let cmd = irx.recv().unwrap();
-            println!("{:?}: command: {cmd}", thread::current().id());
-            {
-                let mut channel = channel.lock().unwrap();
-                channel.write(cmd.as_bytes()).unwrap();
-                channel.flush().unwrap();  
-                i += 1;              
-                id_tx.send(i).unwrap();
+            //println!("{:?}: waiting to recv command...", thread::current().id());
+            match irx.try_recv() {
+                Ok(cmd) => {
+                    println!("{:?}: command: {cmd}", thread::current().id());
+                    let mut writer = writer.lock().unwrap();
+                    writer.write(cmd.as_bytes()).unwrap();
+                    // writer.flush().unwrap();  
+                    i += 1;              
+                    id_tx.send(i).unwrap();                
+                    println!("{:?}: cmd id sent: {i}", thread::current().id());
+                },
+                Err(flume::TryRecvError::Empty) => {
+                    thread::sleep(time::Duration::from_millis(200));                     
+                }
+                Err(e) => {
+                    println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
+                    break;
+                }
             }
         });
     }
@@ -229,63 +233,53 @@ async fn open_terminal_2(state: State<'_,AppState>) -> Result<(), String> {
     {
         let ssh = state.ssh.lock().unwrap();
         let channel = ssh.channel.as_ref().unwrap();
-        let channel = Arc::clone(&channel);
+        let reader = Arc::clone(&channel);
 
         thread::spawn(move || loop {
-            println!("{:?}: waiting to recv read signal...", thread::current().id());
-            match id_rx.recv() {
+            //println!("{:?}: waiting to recv read signal...", thread::current().id());
+            
+            match id_rx.try_recv() {
                 Ok(cmd_id) => {
                     println!("{:?}: running cmd id {cmd_id}...", thread::current().id());
-                    let mut channel = channel.lock().unwrap();
-                    let mut buf = vec![0; 1000];
-                    let mut result = String::new();
-                    loop {
-                        match channel.read(&mut buf) {
-                            Err(e) => {
-                                if e.kind() == std::io::ErrorKind::WouldBlock {
-                                    println!("blocking reading, trying again");
-                                    break;
-                                    // thread::sleep(time::Duration::from_millis(200));
-                                } else {
-                                    println!("Cannot read channel: {e}");   
-                                    assert!(false);     
-                                    // return Err(format!("Cannot read channel: {e}"));        
-                                }
-                            },
-                            Ok(n) => { 
-                                if n > 0 {
-                                    result.push_str(&String::from_utf8_lossy(&buf).to_string());
-                                    //otx.send(result).unwrap();
-                                    if n < 1000 {
-                                        println!("{:?}: ### stdout:\n{result}\n###", thread::current().id());
-                                        break;
-                                    }
-                                } else {
-                                    assert!(n == 0);
-                                    println!("bytes es zero: {n}"); 
-                                    break;
-                                }
+                    let mut buf = vec![0; 4096];
+                    let mut reader = reader.lock().unwrap();
+                    
+                    match reader.read(&mut buf) {  
+                        Ok(0) => {
+                            print!("zero return");
+                            // break;
+                        },                          
+                        Ok(n) => { 
+                            let result = String::from_utf8(buf[0..n].to_vec()).unwrap();
+                            print!("result: \n{result}");                            
+                        },
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                println!("blocking reading, trying again");
+                                break;
+                                // thread::sleep(time::Duration::from_millis(200));
+                            } else {
+                                println!("Cannot read channel: {e}");   
+                                assert!(false);     
+                                // return Err(format!("Cannot read channel: {e}"));        
                             }
-                        };
-                    };                 
+                        },
+                    };                    
                 },
+                Err(flume::TryRecvError::Empty) => {
+                    thread::sleep(time::Duration::from_millis(200));                     
+                }
                 Err(e) => {
-                    println!("Error in id_rx.recv(): {e}");
+                    println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
                     break;
                 }
             }
         });
 
-        //state.itx = Some(Mutex::new(itx));
-        //*state.orx.as_ref().unwrap().lock().unwrap() = orx;
         itx.send("hostname\n".to_string()).unwrap();
-        thread::sleep(time::Duration::from_millis(2000));
-        itx.send("whoami\n".to_string()).unwrap();
-        thread::sleep(time::Duration::from_millis(2000));
-        itx.send("ls /\n".to_string()).unwrap();
-        thread::sleep(time::Duration::from_millis(2000));
+        thread::sleep(time::Duration::from_millis(1000));
         itx.send("ls -l /\n".to_string()).unwrap();
-        thread::sleep(time::Duration::from_millis(2000));
+        thread::sleep(time::Duration::from_millis(1000));
         
         
 
