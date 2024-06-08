@@ -28,6 +28,8 @@ extern crate objc;
 extern crate webkit2gtk;
 
 
+const WAIT_MS: u64 = 10;
+
 #[derive(Default)]
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
@@ -213,14 +215,30 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             match irx.try_recv() {
                 Ok(cmd) => {
                     println!("{:?}: command: {cmd}", thread::current().id());
-                    let mut writer = writer.lock().unwrap();
-                    writer.write(cmd.as_bytes()).unwrap();
-                    if cmd == "\n" || cmd == "\r" {
-                        writer.flush().unwrap();  
-                    }
+                    let mut writer = writer.lock().unwrap();                    
+                    match writer.write(cmd.as_bytes()) {
+                        Ok(0) => {
+                            // Connection closed
+                            panic!("Connection closed by server.");                                
+                        }
+                        Ok(_n) => {
+                            // Process the data
+                            //println!("stdin: \n{}\nend stdin", cmd);
+                            continue;
+                        }
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                println!("Channel write error: {}", e);
+                                thread::sleep(time::Duration::from_millis(WAIT_MS));         
+                                continue;
+                            } else {
+                                panic!("Error reading from channel: {:?}", e);                                
+                            }
+                        }
+                    }                    
                 },
                 Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(10));                     
+                    thread::sleep(time::Duration::from_millis(WAIT_MS));                     
                 }
                 Err(e) => {
                     println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
@@ -236,74 +254,47 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let channel = ssh.channel.as_ref().unwrap();  
         let reader = Arc::clone(&channel);
         let tcp = ssh.tcp.as_ref().unwrap();
+        let tcpclone = tcp.try_clone().unwrap();
         
-        let poller = Poller::new().unwrap();
-        unsafe {
-            poller.add(tcp, Event::readable(1)).unwrap()
-        };
-        let mut events = Events::new();
-        let mut buf = vec![0; 4096];
-
-        thread::spawn(move || loop {
-            println!("Polling...");
-            events.clear();
-            poller.wait(&mut events, None).unwrap();
-        
-            for ev in events.iter() {
-                if ev.key == 1 {
+    
+        thread::spawn(move || {
+            let poller = Poller::new().unwrap();
+            unsafe {
+                poller.add(&tcpclone, Event::readable(1)).unwrap()
+            };
+            let mut events = Events::new();
+            let mut buf = vec![0; 4096];
+    
+            loop {
+                println!("Polling...");
+                events.clear();
+                poller.wait(&mut events, None).unwrap();
+                println!("Polling: data recieved");
+            
+                for ev in events.iter() {
                     println!("EVENT: {:?}", ev);
-                    let mut reader = reader.lock().unwrap();
-                    match reader.read(&mut buf) {
-                        Ok(0) => {
-                            // Connection closed
-                            panic!("Connection closed by server.");                                
-                        }
-                        Ok(n) => {
-                            // Process the data
-                            println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
-                        }
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            println!("Channel read error: {}", e);
-                            continue;
-                        }
-                        Err(e) => {
-                            panic!("Error reading from channel: {:?}", e);                                
-                        }
-                    }                        
+                    if ev.key == 1 {
+                        let mut reader = reader.lock().unwrap();
+                        match reader.read(&mut buf) {
+                            Ok(0) => {
+                                // Connection closed
+                                panic!("Connection closed by server.");                                
+                            }
+                            Ok(n) => {
+                                // Process the data
+                                println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
+                            }
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                println!("Channel read error: {}", e);
+                                continue;
+                            }
+                            Err(e) => {
+                                panic!("Error reading from channel: {:?}", e);                                
+                            }
+                        }                        
+                    }
                 }
-            }
-
-            // for event in events.iter() {
-            //     println!("EVENT: {:?}", event);
-            //     match event.token() {
-            //         CLIENT => {
-            //             if event.is_readable() {
-                            // let mut reader = reader.lock().unwrap();
-                            // match reader.read(&mut buf) {
-                            //     Ok(0) => {
-                            //         // Connection closed
-                            //         panic!("Connection closed by server.");                                
-                            //     }
-                            //     Ok(n) => {
-                            //         // Process the data
-                            //         println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
-                            //     }
-                            //     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            //         println!("Channel read error: {}", e);
-                            //         continue;
-                            //     }
-                            //     Err(e) => {
-                            //         panic!("Error reading from channel: {:?}", e);                                
-                            //     }
-                            // }                        
-            //             }    
-            //             if event.is_writable() {
-            //                 println!("Client writable event");
-            //             }                
-            //         }
-            //         _ => unreachable!(),
-            //     }
-            // }       
+            }            
         });
     }
 

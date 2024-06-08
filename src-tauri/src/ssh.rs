@@ -8,6 +8,8 @@ use std::{thread, time};
 use std::sync::{Arc, Mutex};
 use super::command;
 
+const WAIT_MS: u64 = 20;
+
 #[derive(Default)]
 pub struct Ssh {
     pub tcp: Option<TcpStream>,
@@ -254,29 +256,42 @@ impl Ssh {
                 }
                 Ok(o) => break o
             };
-            thread::sleep(time::Duration::from_millis(200));
+            thread::sleep(time::Duration::from_millis(WAIT_MS));
         };
         
         loop {
             match channel.exec(cmd) {
                 Err(e) => {
-                    if e.code() !=  ssh2::ErrorCode::Session(-37) {
-                        return Err(format!("Error: {}", e));
-                    } else {
+                    if e.code() ==  ssh2::ErrorCode::Session(-37) {
                         println!("bloking..., trying again.");                        
+                        thread::sleep(time::Duration::from_millis(WAIT_MS));
+                    } else {
+                        return Err(format!("Error channel exec: {}", e));
                     }
                 }
-                Ok(o) => break
-            }
-            thread::sleep(time::Duration::from_millis(200));
+                Ok(_) => break
+            }            
         }
 
-
         let mut s = String::new();
-        channel.stderr().read_to_string(&mut s).unwrap();
+        loop {
+            match channel.stderr().read_to_string(&mut s) {
+                Err(ref e) => {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        println!("Channel write error: {}", e);
+                        thread::sleep(time::Duration::from_millis(WAIT_MS));         
+                        continue;
+                    } else {
+                        return Err(format!("Error channel read stderr: {}", e));                                                
+                    }
+                },
+                Ok(_) => break
+            }
+        }
         if !s.trim().is_empty() {
             return Err(format!("stderr: {}",s));
         };
+
         channel.read_to_string(&mut s).unwrap();
 
         loop {
@@ -290,7 +305,7 @@ impl Ssh {
                 }
                 Ok(o) => break
             }
-            thread::sleep(time::Duration::from_millis(200));
+            thread::sleep(time::Duration::from_millis(WAIT_MS));
         }
         let output = s.trim().to_string();
         println!("stdout: {output}");
