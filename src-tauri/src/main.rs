@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 use tauri::State;
 use std::io::{Read, BufReader, Write, BufWriter};
 use std::{thread, time};
+use mio::net::TcpStream as MioTcpStream;
+use mio::{Events, Interest, Poll, Token};
+
 // use serde::{Deserialize, Serialize};
 // use chrono::prelude::{DateTime, NaiveDateTime, Utc};
 
@@ -24,6 +27,8 @@ extern crate objc;
 
 #[cfg(target_os = "linux")]
 extern crate webkit2gtk;
+
+const CLIENT: Token = Token(0);
 
 #[derive(Default)]
 struct AppState {
@@ -191,22 +196,19 @@ async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
     let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    let (id_tx, id_rx): (Sender<i32>, Receiver<i32>) = flume::unbounded();
-    
-    
-    //app.emit_all("terminal-output", Payload {output: "testing event".into()}).unwrap();                          
+    *state.itx.lock().unwrap() = Some(itx);
 
+    // create tty shell
     {
         let mut ssh = state.ssh.lock().unwrap();
         ssh.channel_shell().unwrap();
     }
 
-    // wirte
+    // write
     {
-        let ssh = state.ssh.lock().unwrap();
+        let ssh = state.ssh.lock().unwrap();    
         let channel = ssh.channel.as_ref().unwrap();
         let writer = Arc::clone(&channel);
-        let mut i = 0;
 
         thread::spawn(move || loop {
             //println!("{:?}: waiting to recv command...", thread::current().id());
@@ -218,9 +220,6 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                     if cmd == "\n" || cmd == "\r" {
                         writer.flush().unwrap();  
                     }
-                    i += 1;              
-                    id_tx.send(i).unwrap();                
-                    println!("{:?}: cmd id sent: {i}", thread::current().id());
                 },
                 Err(flume::TryRecvError::Empty) => {
                     thread::sleep(time::Duration::from_millis(10));                     
@@ -233,73 +232,57 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         });
     }
 
-    // read
+    // read 
     {
-        let ssh = state.ssh.lock().unwrap();
-        let channel = ssh.channel.as_ref().unwrap();
+        let ssh = state.ssh.lock().unwrap();  
+        let channel = ssh.channel.as_ref().unwrap();  
         let reader = Arc::clone(&channel);
+        let tcp = ssh.tcp.as_ref().unwrap();
+        let mut mio_tcp = MioTcpStream::from_std(tcp.try_clone().unwrap());
+        let mut events = Events::with_capacity(128);
+        let mut buf = [0; 1024];
+        let mut poll = Poll::new().unwrap();
+        poll.registry().register(&mut mio_tcp, CLIENT, Interest::READABLE | Interest::WRITABLE).unwrap();
+        
 
         thread::spawn(move || loop {
-            //println!("{:?}: waiting to recv read signal...", thread::current().id());
-            
-            match id_rx.try_recv() {
-                Ok(cmd_id) => {
-                    println!("{:?}: running cmd id {cmd_id}...", thread::current().id());
-                    let mut buf = vec![0; 4096];
-                    let mut reader = reader.lock().unwrap();
-                    //loop {
-                        match reader.read(&mut buf) {                                                      
-                            Ok(n) => { 
-                                if n == 0 {
-                                    println!("read is ZERO");
-                                    break;
+            println!("Polling...");
+            // poll.poll(&mut events, Some(time::Duration::from_millis(200))).unwrap();
+            poll.poll(&mut events, None).unwrap();
+
+            for event in events.iter() {
+                println!("EVENT: {:?}", event);
+                match event.token() {
+                    CLIENT => {
+                        if event.is_readable() {
+                            let mut reader = reader.lock().unwrap();
+                            match reader.read(&mut buf) {
+                                Ok(0) => {
+                                    // Connection closed
+                                    panic!("Connection closed by server.");                                
                                 }
-                                println!("Stdout: {:?}", &buf[0..n]);
-                                let result = match String::from_utf8(buf[0..n].to_vec()) {
-                                    Ok(o) => o,
-                                    Err(e) => panic!("invalid utf-8 sequence: {}", e)
-                                };
-                                println!("result ({n}):\n{}", result.clone());  
-                                app.emit_all("terminal-output", Payload {output: buf[0..n].to_vec()}).unwrap();                                 
-                            },
-                            Err(e) => {
-                                if e.kind() == std::io::ErrorKind::WouldBlock {
-                                    println!("blocking reading, trying again");
-                                    break;
-                                    // thread::sleep(time::Duration::from_millis(200));
-                                } else {
-                                    println!("Cannot read channel: {e}");   
-                                    assert!(false);     
-                                    // return Err(format!("Cannot read channel: {e}"));        
+                                Ok(n) => {
+                                    // Process the data
+                                    println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
                                 }
-                            },
-                        };
-                    //}                    
-                },
-                Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(10));                     
+                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                    println!("Channel read error: {}", e);
+                                    continue;
+                                }
+                                Err(e) => {
+                                    panic!("Error reading from channel: {:?}", e);                                
+                                }
+                            }                        
+                        }    
+                        if event.is_writable() {
+                            println!("Client writable event");
+                        }                
+                    }
+                    _ => unreachable!(),
                 }
-                Err(e) => {
-                    println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
-                    break;
-                }
-            }
+            }       
         });
-
-        *state.itx.lock().unwrap() = Some(itx);
-        //let mutex = state.itx.lock().unwrap();
-        //mutex.as_ref().unwrap().send("\n".to_string()).unwrap();
-
-        // itx.send("hostname\n".to_string()).unwrap();
-        // thread::sleep(time::Duration::from_millis(1000));
-        // itx.send("ls -l /\n".to_string()).unwrap();
-        // thread::sleep(time::Duration::from_millis(1000));
-        
-        
-
     }
-
-    
 
     Ok(())
 

@@ -10,7 +10,8 @@ use super::command;
 
 #[derive(Default)]
 pub struct Ssh {
-    session : Option<Session>,
+    pub tcp: Option<TcpStream>,
+    pub session : Option<Session>,
     sftp : Option<Sftp>,
     pub channel : Option<Arc<Mutex<Channel>>>,
     host : String,
@@ -202,6 +203,8 @@ impl Ssh {
             Err(e) => return Err(e),
             Ok(o) => o,
         };
+        let tcp_clone = tcp.try_clone().unwrap();        
+        
         let mut session = Session::new().unwrap();
         session.set_tcp_stream(tcp);
 
@@ -222,8 +225,9 @@ impl Ssh {
             Ok(o) => o,
         };
 
-        //session.set_blocking(false);
+        session.set_blocking(false);
 
+        self.tcp = Some(tcp_clone);
         self.session = Some(session);
         self.sftp = Some(sftp);
         self.host = host.to_string();
@@ -491,12 +495,12 @@ impl Ssh {
     }
     pub fn channel_shell(&mut self) -> Result<(), String> {
         let session = self.session.as_ref().unwrap();
-        //session.set_blocking(true);
+        session.set_blocking(true);
         let mut channel = session.channel_session().unwrap();
-        channel.request_pty("xterm", None, None).unwrap();
+        channel.request_pty("xterm-256color", None, None).unwrap();
         channel.shell().unwrap();
         self.channel = Some(Arc::new(Mutex::new(channel)));
-        //session.set_blocking(false);
+        session.set_blocking(false);
         Ok(())
     }
     // pub fn channel_read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
