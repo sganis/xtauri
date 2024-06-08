@@ -8,15 +8,14 @@ mod settings;
 mod ssh;
 mod command;
 
+use std::{thread, time};
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
+use polling::{Event, Events, Poller};
 use flume::{Sender, Receiver};
 use tauri::{Manager, Window};
-use settings::Settings;
-use std::sync::{Arc, Mutex};
 use tauri::State;
-use std::io::{Read, BufReader, Write, BufWriter};
-use std::{thread, time};
-use mio::net::TcpStream as MioTcpStream;
-use mio::{Events, Interest, Poll, Token};
+use settings::Settings;
 
 // use serde::{Deserialize, Serialize};
 // use chrono::prelude::{DateTime, NaiveDateTime, Utc};
@@ -28,7 +27,6 @@ extern crate objc;
 #[cfg(target_os = "linux")]
 extern crate webkit2gtk;
 
-const CLIENT: Token = Token(0);
 
 #[derive(Default)]
 struct AppState {
@@ -238,49 +236,74 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let channel = ssh.channel.as_ref().unwrap();  
         let reader = Arc::clone(&channel);
         let tcp = ssh.tcp.as_ref().unwrap();
-        let mut mio_tcp = MioTcpStream::from_std(tcp.try_clone().unwrap());
-        let mut events = Events::with_capacity(128);
-        let mut buf = [0; 1024];
-        let mut poll = Poll::new().unwrap();
-        poll.registry().register(&mut mio_tcp, CLIENT, Interest::READABLE | Interest::WRITABLE).unwrap();
         
+        let poller = Poller::new().unwrap();
+        unsafe {
+            poller.add(tcp, Event::readable(1)).unwrap()
+        };
+        let mut events = Events::new();
+        let mut buf = vec![0; 4096];
 
         thread::spawn(move || loop {
             println!("Polling...");
-            // poll.poll(&mut events, Some(time::Duration::from_millis(200))).unwrap();
-            poll.poll(&mut events, None).unwrap();
-
-            for event in events.iter() {
-                println!("EVENT: {:?}", event);
-                match event.token() {
-                    CLIENT => {
-                        if event.is_readable() {
-                            let mut reader = reader.lock().unwrap();
-                            match reader.read(&mut buf) {
-                                Ok(0) => {
-                                    // Connection closed
-                                    panic!("Connection closed by server.");                                
-                                }
-                                Ok(n) => {
-                                    // Process the data
-                                    println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
-                                }
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                    println!("Channel read error: {}", e);
-                                    continue;
-                                }
-                                Err(e) => {
-                                    panic!("Error reading from channel: {:?}", e);                                
-                                }
-                            }                        
-                        }    
-                        if event.is_writable() {
-                            println!("Client writable event");
-                        }                
-                    }
-                    _ => unreachable!(),
+            events.clear();
+            poller.wait(&mut events, None).unwrap();
+        
+            for ev in events.iter() {
+                if ev.key == 1 {
+                    println!("EVENT: {:?}", ev);
+                    let mut reader = reader.lock().unwrap();
+                    match reader.read(&mut buf) {
+                        Ok(0) => {
+                            // Connection closed
+                            panic!("Connection closed by server.");                                
+                        }
+                        Ok(n) => {
+                            // Process the data
+                            println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            println!("Channel read error: {}", e);
+                            continue;
+                        }
+                        Err(e) => {
+                            panic!("Error reading from channel: {:?}", e);                                
+                        }
+                    }                        
                 }
-            }       
+            }
+
+            // for event in events.iter() {
+            //     println!("EVENT: {:?}", event);
+            //     match event.token() {
+            //         CLIENT => {
+            //             if event.is_readable() {
+                            // let mut reader = reader.lock().unwrap();
+                            // match reader.read(&mut buf) {
+                            //     Ok(0) => {
+                            //         // Connection closed
+                            //         panic!("Connection closed by server.");                                
+                            //     }
+                            //     Ok(n) => {
+                            //         // Process the data
+                            //         println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
+                            //     }
+                            //     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            //         println!("Channel read error: {}", e);
+                            //         continue;
+                            //     }
+                            //     Err(e) => {
+                            //         panic!("Error reading from channel: {:?}", e);                                
+                            //     }
+                            // }                        
+            //             }    
+            //             if event.is_writable() {
+            //                 println!("Client writable event");
+            //             }                
+            //         }
+            //         _ => unreachable!(),
+            //     }
+            // }       
         });
     }
 
