@@ -210,29 +210,31 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let writer = Arc::clone(&channel);
         let mut i = 0;
 
-        thread::spawn(move || loop {
-            //println!("{:?}: waiting to recv command...", thread::current().id());
-            match irx.try_recv() {
-                Ok(cmd) => {
-                    println!("{:?}: command: {:?}", thread::current().id(), cmd.as_bytes());
-                    let mut writer = writer.lock().unwrap();
-                    writer.write(cmd.as_bytes()).unwrap();
-                    if cmd == "\r" {
-                        // make another enter
-                        println!("ANOTHER ENTER");
-                        writer.flush().unwrap();
-                        //id_tx.send(i).unwrap();                                    
+        tauri::async_runtime::spawn(async move { 
+            loop {
+                //println!("{:?}: waiting to recv command...", thread::current().id());
+                match irx.try_recv() {
+                    Ok(cmd) => {
+                        println!("{:?}: command: {:?}", thread::current().id(), cmd.as_bytes());
+                        let mut writer = writer.lock().unwrap();
+                        writer.write(cmd.as_bytes()).unwrap();
+                        if cmd == "\r" {
+                            // make another enter
+                            println!("ANOTHER ENTER");
+                            writer.flush().unwrap();
+                            //id_tx.send(i).unwrap();                                    
+                        }
+                        i += 1;              
+                        //id_tx.send(i).unwrap();                
+                        //println!("{:?}: cmd id sent: {i}", thread::current().id());
+                    },
+                    Err(flume::TryRecvError::Empty) => {
+                        thread::sleep(time::Duration::from_millis(WAIT_MS));                     
                     }
-                    i += 1;              
-                    //id_tx.send(i).unwrap();                
-                    //println!("{:?}: cmd id sent: {i}", thread::current().id());
-                },
-                Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(WAIT_MS));                     
-                }
-                Err(e) => {
-                    println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
-                    break;
+                    Err(e) => {
+                        println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
+                        break;
+                    }
                 }
             }
         });
@@ -244,7 +246,8 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let channel = ssh.channel.as_ref().unwrap();
         let reader = Arc::clone(&channel);
 
-        thread::spawn(move || loop {
+        tauri::async_runtime::spawn(async move {
+            loop {
             //println!("{:?}: waiting to recv read signal...", thread::current().id());
             
             //match id_rx.try_recv() {
@@ -288,6 +291,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                 // }
             // }
             // }
+            }
         });
 
         *state.itx.lock().unwrap() = Some(itx);
