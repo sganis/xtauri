@@ -25,7 +25,7 @@
             cursorBlink: true, 
             convertEol: true,            
             fontFamily: "monospace",
-            fontSize: 16,
+            fontSize: 20,
         });
 
         term.write('Connecting... \n\n');
@@ -37,63 +37,28 @@
         fit.fit();
 
         term.onData(async (data) => {
-            const code = data.charCodeAt(0);
-            if (code == 13 || code == 10) { // CR
-            
-            }
             await invoke("send_key", {key: data});
         });
 
-        // term.onData(async data => {
-        //     if (data === '\r') {                
-        //         term.write('\n$ ');                
-        //     } else {
-        //         //term.write(data);
-        //     }
-        //     await invoke("send_key", {key: data});
-        //     //command += data;            
-        //     // if (data === '\r') {
-        //     //     term.write('\n$ ');
-        //     //     try {                
-        //     //         command = command.trim();
-        //     //         if (command.length > 0) {
-        //     //             command = `sh -c "${command}"`
-        //     //             let r = await invoke('ssh_run', {command});      
-        //     //             console.log(r);      
-        //     //             term.write(r);
-        //     //             term.write('\n$ ');
-        //     //         }
-        //     //     } catch(e) {
-        //     //         term.write('\x1b[1;31m ' + e + '\x1b[37m\n$ ');
-
-        //     //         console.log(e);
-        //     //     }
-        //     //     command = '';
-        //     // } else {
-        //     //     term.write(data);
-        //     // }
-        // });
-
-        term.onKey((key) => {
-            
-            //console.log('onKey: ', key);
-            //await invoke('send_key', key);            
-        });
         term.onLineFeed (async () => {
-            // console.log('onLineFeed');
-            
+            // console.log('onLineFeed');          
         });
         term.onScroll(n => {
-            console.log('onScroll: ', n);
+            //console.log('onScroll: ', n);
         });
         term.onSelectionChange(() => {
-            console.log('onSelectionChange');
+            //console.log('onSelectionChange');
+        });
+        term.onResize(e => {
+            console.log('onResize', e);
+            // websocket.send({ rows: evt.rows });
         });
 
         appWindow.listen("terminal-output", ({event, payload}) => {
-            console.log('data: ', payload);
-            term.write(payload.output);
+            //console.log('data: ', payload);
+            term.write(payload.data);
         })
+
         await invoke('open_terminal');
 
     });
@@ -101,7 +66,7 @@
 </script>
 
 <div class="d-flex flex-column flex-grow-1 term-container h100">
-    <div class="terminal" bind:this={termEl} />
+    <div class="terminal border-yellow" bind:this={termEl} />
 </div>
 
 

@@ -10,11 +10,12 @@ mod command;
 
 use std::{thread, time};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
-use polling::{Event, Events, Poller};
-use flume::{Sender, Receiver};
+use std::sync::Arc;
 use tauri::{Manager, Window};
 use tauri::State;
+use tokio::sync::{mpsc, Mutex};
+use mio::net::TcpStream as MioTcpStream;
+use mio::{Events, Interest, Poll, Token};
 use settings::Settings;
 
 // use serde::{Deserialize, Serialize};
@@ -34,13 +35,14 @@ const WAIT_MS: u64 = 10;
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
-    itx: Mutex<Option<Sender<String>>>,
+    itx: Mutex<Option<mpsc::Sender<String>>>,
 }
 
 // the payload type must implement `Serialize` and `Clone`.
 #[derive(Clone, serde::Serialize)]
 struct Payload {
-  output: Vec::<u8>,
+    data: Vec::<u8>,
+    // data: String,
 }
 
 #[tauri::command]
@@ -53,7 +55,7 @@ fn write_settings(settings: Settings) -> Result<(), String> {
     settings::write_settings(settings)
 }
 #[tauri::command]
-fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
+async fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
     let mut _ssh = ssh::Ssh::new();
     match _ssh.connect_with_password(
         settings.server.as_str(), 
@@ -65,9 +67,9 @@ fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Resul
         },
         Ok(_) => {
             write_settings(settings).expect("Cannot write settings");
-            let mut ssh = state.ssh.lock().unwrap();
+            let mut ssh = state.ssh.lock().await;
             *ssh = _ssh;
-            *state.connected.lock().unwrap() = true;
+            *state.connected.lock().await = true;
             println!("Connected");
             let output = ssh.run("whoami").unwrap();
             println!("{}", output);
@@ -77,7 +79,7 @@ fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Resul
 }
 
 #[tauri::command]
-fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
+async fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
     let mut _ssh = ssh::Ssh::new();
     let mut pkey = String::new();
     
@@ -96,9 +98,9 @@ fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Result<(),
         },        
         Ok(_) => {
             write_settings(settings).expect("Cannot write settings");
-            let mut ssh = state.ssh.lock().unwrap();
+            let mut ssh = state.ssh.lock().await;
             *ssh = _ssh;
-            *state.connected.lock().unwrap() = true;
+            *state.connected.lock().await = true;
             println!("Connected");
             let output = ssh.run("whoami").unwrap();
             println!("{}", output);
@@ -108,8 +110,8 @@ fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Result<(),
 }
 
 #[tauri::command]
-fn disconnect(app: State<AppState>) -> Result<(), String> {
-    let mut ssh = app.ssh.lock().unwrap();
+async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    let mut ssh = state.ssh.lock().await;
     ssh.disconnect()   
 }
 
@@ -124,7 +126,7 @@ async fn setup_ssh(settings: Settings) -> Result<(), String> {
 
 #[tauri::command]
 async fn ssh_run(command: String, state: State<'_,AppState>) -> Result<String, String> {
-    let mut ssh = state.ssh.lock().unwrap();
+    let mut ssh = state.ssh.lock().await;
     ssh.run(&command)
 }
 
@@ -134,7 +136,7 @@ async fn download(
     localpath: String,
     window: Window, 
     state: State<'_, AppState>) -> Result<String, String> {
-    let mut ssh = state.ssh.lock().unwrap();
+    let mut ssh = state.ssh.lock().await;
     match ssh.scp_download(&remotepath, &localpath, window) {
         Err(e) => Err(e),
         Ok(o) => {
@@ -150,7 +152,7 @@ async fn upload(
     remotepath: String, 
     window: Window,
     state: State<'_,AppState>) -> Result<String, String> {
-    let mut ssh = state.ssh.lock().unwrap();
+    let mut ssh = state.ssh.lock().await;
     match ssh.scp_upload(&localpath, &remotepath, window) {
         Err(e) => Err(e),
         Ok(o) => {
@@ -187,36 +189,35 @@ fn zoom_window(window: tauri::Window, scale_factor: f64) {
 #[tauri::command]
 async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
     println!("key: {key}");
-    let mutex = state.itx.lock().unwrap();
-    mutex.as_ref().unwrap().send(key).unwrap();
-    Ok(())
+    let mutex = state.itx.lock().await;
+    mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())    
 }
-
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    let (itx, irx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    *state.itx.lock().unwrap() = Some(itx);
+    //let (itx,mut irx): (Sender<String>, Receiver<String>) = flume::unbounded();
+    let (itx, mut irx): (mpsc::Sender<String>,mpsc::Receiver<String>) = mpsc::channel(100);
+
+    *state.itx.lock().await = Some(itx);
 
     // create tty shell
     {
-        let mut ssh = state.ssh.lock().unwrap();
+        let mut ssh = state.ssh.lock().await;
         ssh.channel_shell().unwrap();
     }
 
     // write
     {
-        let ssh = state.ssh.lock().unwrap();    
+        let ssh = state.ssh.lock().await;    
         let channel = ssh.channel.as_ref().unwrap();
         let writer = Arc::clone(&channel);
 
-        tauri::async_runtime::spawn(async move { 
+        tokio::spawn(async move { 
             loop {
-            //println!("{:?}: waiting to recv command...", thread::current().id());
-            match irx.try_recv() {
-                Ok(cmd) => {
+                //println!("{:?}: waiting to recv command...", thread::current().id());
+                if let Some(cmd) = irx.recv().await {
                     println!("{:?}: command: {cmd}", thread::current().id());
-                    let mut writer = writer.lock().unwrap();                    
+                    let mut writer = writer.lock().await;                    
                     match writer.write(cmd.as_bytes()) {
                         Ok(0) => {
                             // Connection closed
@@ -237,65 +238,70 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                             }
                         }
                     }                    
-                },
-                Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(WAIT_MS));                     
                 }
-                Err(e) => {
-                    println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
-                    break;
-                }
-            }
-        }
+            }        
         });      
         
     }
 
     // read 
     {
-        let ssh = state.ssh.lock().unwrap();  
+        let ssh = state.ssh.lock().await;  
         let channel = ssh.channel.as_ref().unwrap();  
         let reader = Arc::clone(&channel);
         let tcp = ssh.tcp.as_ref().unwrap();
         let tcpclone = tcp.try_clone().unwrap();
         
     
-        thread::spawn(move || {
-            let poller = Poller::new().unwrap();
-            unsafe {
-                poller.add(&tcpclone, Event::readable(1)).unwrap()
-            };
-            let mut events = Events::new();
-            let mut buf = vec![0; 4096];
+        let mut buf = vec![0; 4096];
     
+        tokio::spawn(async move {
+        
+            let mut poll = Poll::new().unwrap();
+            let mut mio_tcp = MioTcpStream::from_std(tcpclone);
+            poll.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
+            let mut events = Events::with_capacity(128);
+                
             loop {
-                println!("Polling...");
-                events.clear();
-                poller.wait(&mut events, None).unwrap();
-                println!("Polling: data recieved");
+                //println!("Polling...");
+                //events.clear();
+                poll.poll(&mut events, None).unwrap();
+                //println!("Polling: data recieved");
             
-                for ev in events.iter() {
-                    println!("EVENT: {:?}", ev);
-                    if ev.key == 1 {
-                        let mut reader = reader.lock().unwrap();
-                        match reader.read(&mut buf) {
-                            Ok(0) => {
-                                // Connection closed
-                                panic!("Connection closed by server.");                                
+                for _ev in events.iter() {
+                    //println!("EVENT: {:?}", ev);
+                    
+                    let mut reader = reader.lock().await;
+                    //let mut buf = vec![0; 1000];
+                    
+                    match reader.read(&mut buf) {                                                      
+                        Ok(n) => { 
+                            if n == 0 {
+                                panic!("read is ZERO");
                             }
-                            Ok(n) => {
-                                // Process the data
-                                println!("stdout: \n{}\nend stdout", String::from_utf8_lossy(&buf[..n]));
+                            println!("Stdout: {:?}", &buf[0..n]);
+                            // let data = match String::from_utf8(buf[..n].to_vec()) {
+                            //     Ok(o) => o,
+                            //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
+                            // };
+                            //println!("result ({n}):\n{}", result.clone());  
+                            app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
+                            //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
+                            
+                        },
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                //println!("blocking reading, trying again");
+                                thread::sleep(time::Duration::from_millis(WAIT_MS));
+                                // TODO: 
+                                // poll_for_new_data();
+                            } else {
+                                panic!("Cannot read channel: {e}");   
                             }
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                println!("Channel read error: {}", e);
-                                continue;
-                            }
-                            Err(e) => {
-                                panic!("Error reading from channel: {:?}", e);                                
-                            }
-                        }                        
-                    }
+                        },
+                    };                   
+                        
+                    
                 }
             }            
         });
@@ -304,9 +310,9 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     Ok(())
 
 }
-
-fn main() {
-
+#[tokio::main]
+async fn main() {
+    tauri::async_runtime::set(tokio::runtime::Handle::current());
     tauri::Builder::default()     
         .setup(|app| {
             app.manage(AppState::default());

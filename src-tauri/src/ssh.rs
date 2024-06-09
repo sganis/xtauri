@@ -6,7 +6,6 @@ use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
 use std::sync::{Arc, Mutex};
-use polling::{Event, Events, Poller};
 
 use super::command;
 
@@ -16,8 +15,8 @@ const WAIT_MS: u64 = 20;
 pub struct Ssh {
     pub tcp: Option<TcpStream>,
     pub session : Option<Session>,
+    pub channel : Option<Arc<tokio::sync::Mutex<Channel>>>,
     sftp : Option<Sftp>,
-    pub channel : Option<Arc<Mutex<Channel>>>,
     host : String,
     user : String,
     password : String,
@@ -517,7 +516,7 @@ impl Ssh {
         let mut channel = session.channel_session().unwrap();
         channel.request_pty("xterm-256color", None, None).unwrap();
         channel.shell().unwrap();
-        self.channel = Some(Arc::new(Mutex::new(channel)));
+        self.channel = Some(Arc::new(tokio::sync::Mutex::new(channel)));
         session.set_blocking(false);
         Ok(())
     }
