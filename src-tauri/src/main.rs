@@ -210,7 +210,8 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let channel = ssh.channel.as_ref().unwrap();
         let writer = Arc::clone(&channel);
 
-        thread::spawn(move || loop {
+        tauri::async_runtime::spawn(async move { 
+            loop {
             //println!("{:?}: waiting to recv command...", thread::current().id());
             match irx.try_recv() {
                 Ok(cmd) => {
@@ -245,7 +246,9 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                     break;
                 }
             }
-        });
+        }
+        });      
+        
     }
 
     // read 

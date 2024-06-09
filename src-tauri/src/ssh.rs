@@ -6,6 +6,8 @@ use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
 use std::sync::{Arc, Mutex};
+use polling::{Event, Events, Poller};
+
 use super::command;
 
 const WAIT_MS: u64 = 20;
@@ -167,7 +169,8 @@ impl Ssh {
             return Err(error);
         }
 
-        Ok(tcp.unwrap())
+        let tcp = tcp.unwrap();
+        Ok(tcp)
     }
     pub fn connect_with_password(&mut self, host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
         
