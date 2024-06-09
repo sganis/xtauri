@@ -101,7 +101,7 @@
           else if (e.key === '0' && e.ctrlKey) {
               zoom = 1.0;
           }
-          await invoke("zoom_window", {scaleFactor:zoom});
+          await invoke("zoom_window", {zoom});
           console.log(e)
       }
   </script>

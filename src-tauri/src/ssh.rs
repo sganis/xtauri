@@ -5,7 +5,8 @@ use std::time::Duration;
 use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use super::command;
 
@@ -15,7 +16,7 @@ const WAIT_MS: u64 = 20;
 pub struct Ssh {
     pub tcp: Option<TcpStream>,
     pub session : Option<Session>,
-    pub channel : Option<Arc<tokio::sync::Mutex<Channel>>>,
+    pub channel : Option<Arc<Mutex<Channel>>>,
     sftp : Option<Sftp>,
     host : String,
     user : String,

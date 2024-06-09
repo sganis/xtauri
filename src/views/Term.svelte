@@ -14,7 +14,6 @@
     
     let termEl;
     let term;
-    let command = '';
 
     onMount(async () => {
         //console.log('term mounted');
@@ -50,13 +49,19 @@
             //console.log('onSelectionChange');
         });
         term.onResize(e => {
-            console.log('onResize', e);
+            //console.log('onResize', e);
             // websocket.send({ rows: evt.rows });
         });
+        term.onRender (() => {
+            //console.log('rendering');
+            //fit.fit();
+        });
 
-        appWindow.listen("terminal-output", ({event, payload}) => {
-            //console.log('data: ', payload);
+        appWindow.listen("terminal-output", ({payload}) => {
             term.write(payload.data);
+        });
+        appWindow.onResized(({ payload: size }) => {
+            fit.fit();
         })
 
         await invoke('open_terminal');
@@ -65,8 +70,8 @@
 
 </script>
 
-<div class="d-flex flex-column flex-grow-1 term-container h100">
-    <div class="terminal border-yellow" bind:this={termEl} />
+<div class="d-flex flex-column flex-grow-1 term-container border h100">
+    <div class="terminal" bind:this={termEl} />
 </div>
 
 
