@@ -11,6 +11,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@popperjs/core": "2.11.8",
     "@tauri-apps/api": "^1"
   },
   "devDependencies": {
