@@ -294,16 +294,14 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 println!("blocking reading, trying again");
-                                thread::sleep(time::Duration::from_millis(WAIT_MS));
+                                //thread::sleep(time::Duration::from_millis(WAIT_MS));
                                 // TODO: 
                                 // poll_for_new_data();
                             } else {
                                 panic!("Cannot read channel: {e}");   
                             }
                         },
-                    };                   
-                        
-                    
+                    };  
                 }
             }            
         });
@@ -314,6 +312,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
 }
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
     tauri::async_runtime::set(tokio::runtime::Handle::current());
     tauri::Builder::default()     
         .setup(|app| {
