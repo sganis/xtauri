@@ -218,7 +218,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             loop {
                 //println!("{:?}: waiting to recv command...", thread::current().id());
                 if let Some(cmd) = irx.recv().await {
-                    println!("{:?}: command: {cmd}", thread::current().id());
+                    println!("command: {cmd}");
                     let mut writer = writer.lock().await;                    
                     match writer.write(cmd.as_bytes()) {
                         Ok(0) => {
@@ -265,13 +265,13 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             let mut events = Events::with_capacity(128);
                 
             loop {
-                //println!("Polling...");
+                println!("Polling...");
                 //events.clear();
                 poll.poll(&mut events, None).unwrap();
                 //println!("Polling: data recieved");
             
                 for _ev in events.iter() {
-                    //println!("EVENT: {:?}", ev);
+                    println!("EVENT: {:?}", _ev);
                     
                     let mut reader = reader.lock().await;
                     //let mut buf = vec![0; 1000];
@@ -293,7 +293,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         },
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                //println!("blocking reading, trying again");
+                                println!("blocking reading, trying again");
                                 thread::sleep(time::Duration::from_millis(WAIT_MS));
                                 // TODO: 
                                 // poll_for_new_data();
