@@ -5,13 +5,14 @@ use std::time::Duration;
 use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
+use std::sync::{Arc, Mutex};
 use super::command;
 
 #[derive(Default)]
 pub struct Ssh {
     session : Option<Session>,
     sftp : Option<Sftp>,
-    channel : Option<Channel>,
+    pub channel : Option<Arc<Mutex<Channel>>>,
     host : String,
     user : String,
     password : String,
@@ -221,6 +222,7 @@ impl Ssh {
             Ok(o) => o,
         };
 
+<<<<<<< HEAD
         let mut channel = match session.channel_session() {
             Err(e) => return Err(format!("Cannot create channel {e}")),
             Ok(o) => o,
@@ -232,11 +234,12 @@ impl Ssh {
             println!("channel created but not eof");
         }
 
+=======
+>>>>>>> 76826902449a6f0a835f4d29753c746724628526
         //session.set_blocking(false);
 
         self.session = Some(session);
         self.sftp = Some(sftp);
-        self.channel = Some(channel);
         self.host = host.to_string();
         self.user = user.to_string();
         self.private_key = pkey.to_string();
@@ -500,72 +503,14 @@ impl Ssh {
         f.write_all(data.as_bytes()).expect("Cannot write data");
         Ok(())
     }
-    pub fn channel_read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
-
-        let channel = self.channel.as_mut().unwrap();
-        let mut bytes_read = 0;
-        let mut result = String::new();
-
-        let bytes = loop {
-            println!("loop: eof: {}", channel.eof());
-            
-            match channel.read(buf) {
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        println!("blocking reading, trying again");
-                        thread::sleep(time::Duration::from_millis(200));
-                    } else {
-                        return Err(format!("Cannot read channel: {e}"));        
-                    }
-                },
-                Ok(n) => { 
-                    println!("n: {n}");
-                    if n > 0 {         
-                        result.push_str(&String::from_utf8_lossy(buf).to_string());
-                        bytes_read += n;                
-                        println!("bytes: {bytes_read}"); 
-                        println!("result: {result}");                         
-                    } else {
-                        println!("0 bytes read, done");
-                        break bytes_read;
-                    }
-                }
-            };
-        };  
-
-        println!("### Bytes: {bytes}\nResult:\n{result}\n###");
-
-        Ok(bytes)
-    }
-    pub fn channel_write(&mut self, buf: &[u8]) -> Result<usize, String> {
-
-        let channel = self.channel.as_mut().unwrap();
-
-        let bytes = loop {
-            match channel.write(buf) {
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        println!("blocking writing, trying again");
-                    } else {
-                        return Err(format!("Cannot write channel: {e}"));        
-                    }
-                },
-                Ok(n) => { 
-                    if n > 0 {
-                        break n;
-                    } else {
-                        println!("0 bytes written, trying again");
-                    }
-                }
-            }; 
-        };
-        channel.flush().unwrap();
-        Ok(bytes)
-    }
-    pub fn channel_flush(&mut self) -> Result<(), String> {
-
-        let channel = self.channel.as_mut().unwrap();
-        channel.flush().unwrap();
+    pub fn channel_shell(&mut self) -> Result<(), String> {
+        let session = self.session.as_ref().unwrap();
+        //session.set_blocking(true);
+        let mut channel = session.channel_session().unwrap();
+        channel.request_pty("xterm-256color", None, None).unwrap();
+        channel.shell().unwrap();
+        self.channel = Some(Arc::new(Mutex::new(channel)));
+        //session.set_blocking(false);
         Ok(())
     }
 }
