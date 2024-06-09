@@ -268,7 +268,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                 println!("Polling...");
                 //events.clear();
                 poll.poll(&mut events, None).unwrap();
-                //println!("Polling: data recieved");
+                println!("Polling: data recieved");
             
                 for _ev in events.iter() {
                     println!("EVENT: {:?}", _ev);
