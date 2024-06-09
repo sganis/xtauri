@@ -222,20 +222,6 @@ impl Ssh {
             Ok(o) => o,
         };
 
-<<<<<<< HEAD
-        let mut channel = match session.channel_session() {
-            Err(e) => return Err(format!("Cannot create channel {e}")),
-            Ok(o) => o,
-        };
-        channel.request_pty("xterm-256color", None, None).unwrap();
-        channel.handle_extended_data(ssh2::ExtendedData::Merge).unwrap();
-        channel.shell().unwrap();
-        if !channel.eof() {
-            println!("channel created but not eof");
-        }
-
-=======
->>>>>>> 76826902449a6f0a835f4d29753c746724628526
         //session.set_blocking(false);
 
         self.session = Some(session);
@@ -505,12 +491,12 @@ impl Ssh {
     }
     pub fn channel_shell(&mut self) -> Result<(), String> {
         let session = self.session.as_ref().unwrap();
-        //session.set_blocking(true);
+        session.set_blocking(true);
         let mut channel = session.channel_session().unwrap();
         channel.request_pty("xterm-256color", None, None).unwrap();
         channel.shell().unwrap();
         self.channel = Some(Arc::new(Mutex::new(channel)));
-        //session.set_blocking(false);
+        session.set_blocking(false);
         Ok(())
     }
 }

@@ -217,13 +217,14 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                     println!("{:?}: command: {:?}", thread::current().id(), cmd.as_bytes());
                     let mut writer = writer.lock().unwrap();
                     writer.write(cmd.as_bytes()).unwrap();
-                    // if cmd == "\r" {
-                    //     // make another enter
-                    //     println!("ANOTHER ENTER");
-                    //     writer.write(b"\n").unwrap();
-                    // }
+                    if cmd == "\r" {
+                        // make another enter
+                        println!("ANOTHER ENTER");
+                        writer.flush().unwrap();
+                        //id_tx.send(i).unwrap();                                    
+                    }
                     i += 1;              
-                    id_tx.send(i).unwrap();                
+                    //id_tx.send(i).unwrap();                
                     //println!("{:?}: cmd id sent: {i}", thread::current().id());
                 },
                 Err(flume::TryRecvError::Empty) => {
@@ -246,9 +247,9 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         thread::spawn(move || loop {
             //println!("{:?}: waiting to recv read signal...", thread::current().id());
             
-            match id_rx.try_recv() {
-                Ok(cmd_id) => {
-                    println!("{:?}: running cmd id {cmd_id}...", thread::current().id());
+            //match id_rx.try_recv() {
+            //    Ok(cmd_id) => {
+            //        println!("{:?}: running cmd id {cmd_id}...", thread::current().id());
                     let mut buf = vec![0; 4096];
                     let mut reader = reader.lock().unwrap();
                     match reader.read(&mut buf) {                                                      
@@ -257,34 +258,36 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 panic!("read is ZERO");
                             }
                             println!("Stdout: {:?}", &buf[0..n]);
-                            let result = match String::from_utf8(buf[..n].to_vec()) {
-                                Ok(o) => o,
-                                Err(e) => panic!("invalid utf-8 sequence: {}", e)
-                            };
-                            println!("result ({n}):\n{}", result.clone());  
+                            // let result = match String::from_utf8(buf[..n].to_vec()) {
+                            //     Ok(o) => o,
+                            //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
+                            // };
+                            // println!("result ({n}):\n{}", result.clone());  
                             app.emit_all("terminal-output", Payload {output: buf[..n].to_vec()}).unwrap();                                 
                             
                         },
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                println!("blocking reading, trying again");
+                                //println!("blocking reading, trying again");
                                 thread::sleep(time::Duration::from_millis(WAIT_MS));
-                                
+                                // TODO: 
+                                // poll_for_new_data();
                             } else {
                                 panic!("Cannot read channel: {e}");   
                             }
                         },
                     };                   
                                  
-                },
-                Err(flume::TryRecvError::Empty) => {
-                    thread::sleep(time::Duration::from_millis(WAIT_MS));                     
-                }
-                Err(e) => {
-                    println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
-                    break;
-                }
-            }
+                //}
+                // Err(flume::TryRecvError::Empty) => {
+                //     thread::sleep(time::Duration::from_millis(WAIT_MS));                     
+                // }
+                // Err(e) => {
+                //     println!("{:?}: Error in id_rx.try_recv(): {e}", thread::current().id());
+                //     break;
+                // }
+            // }
+            // }
         });
 
         *state.itx.lock().unwrap() = Some(itx);
