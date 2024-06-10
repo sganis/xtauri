@@ -589,25 +589,28 @@ mod tests {
             &host, PORT, &user, &pkey).await;
         assert!(r.is_ok());
     }
-    #[test]
-    fn connect_with_key_wrong() {
+    #[tokio::test]
+    async fn connect_with_key_wrong() {
         let mut ssh = Ssh::new();
         let (host, user, _, _) = get_params();
-        let r = ssh.connect_with_key(&host, PORT, &user, "/invalid/key");
+        let r = ssh.connect_with_key(
+            &host, PORT, &user, "/invalid/key").await;
         assert!(r.is_err());
     }
-    #[test]
-    fn connect_with_host_wrong() {
+    #[tokio::test]
+    async fn connect_with_host_wrong() {
         let mut ssh = Ssh::new();
         let (_, user, pass, _) = get_params();
-        let r = ssh.connect_with_password("example.com", PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            "example.com", PORT, &user, &pass).await;
         assert!(r.is_err());
     }
-    #[test]
-    fn run_command() {
+    #[tokio::test]
+    async fn run_command() {
         let mut ssh = Ssh::new();
         let (host, user, pass, _) = get_params();
-        let r = ssh.connect_with_password(&host, PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, &pass).await;
         assert!(r.is_ok());
         let output = ssh.run("whoami").unwrap();
         assert_eq!("support", output.as_str());
@@ -659,11 +662,12 @@ mod tests {
     fn supported_algs() {
         println!("{}",Ssh::supported_algs());
     }
-    #[test]
-    fn mkdir_rmdir() {
+    #[tokio::test]
+    async fn mkdir_rmdir() {
         let mut ssh = Ssh::new();
         let (host, user, pass, home) = get_params();
-        let r = ssh.connect_with_password(&host, PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, &pass).await;
         assert!(r.is_ok());
         let folder = format!("{home}/folder");
         assert!(ssh.sftp_stat(&home).is_ok());
@@ -674,11 +678,12 @@ mod tests {
         assert!(ssh.sftp_stat(&folder).is_err());
         
     }
-    #[test]
-    fn create_delete() {
+    #[tokio::test]
+    async fn create_delete() {
         let mut ssh = Ssh::new();
         let (host, user, pass, home) = get_params();
-        let r = ssh.connect_with_password(&host, PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, &pass).await;
         assert!(r.is_ok());
         assert!(ssh.sftp_stat(&home).is_ok());
         assert!(ssh.sftp_stat( &format!("{home}/file")).is_err());
@@ -695,11 +700,12 @@ mod tests {
         assert!(ssh.sftp_stat( &format!("{home}/dir")).is_err());
         
     }
-    #[test]
-    fn readdir() {
+    #[tokio::test]
+    async fn readdir() {
         let mut ssh = Ssh::new();
         let (host, user, pass, home) = get_params();        
-        let r = ssh.connect_with_password(&host, PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, &pass).await;
         assert!(r.is_ok());
         assert!(ssh.sftp_stat(&home).is_ok());
         let files = ssh.sftp_readdir("/").unwrap();
@@ -708,11 +714,12 @@ mod tests {
         //     println!("{:?}", f);
         // }
     }
-    #[test]
-    fn rename() {
+    #[tokio::test]
+    async fn rename() {
         let mut ssh = Ssh::new();
         let (host, user, pass, home) = get_params();
-        let r = ssh.connect_with_password(&host, PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, &pass).await;
         assert!(r.is_ok());
         assert!(ssh.sftp_stat( &format!("{home}")).is_ok());
         assert!(ssh.sftp_stat( &format!("{home}/file")).is_err());

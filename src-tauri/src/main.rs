@@ -218,7 +218,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             loop {
                 //println!("{:?}: waiting to recv command...", thread::current().id());
                 if let Some(cmd) = irx.recv().await {
-                    println!("{:?}: command: {cmd}", thread::current().id());
+                    println!("command: {cmd}");
                     let mut writer = writer.lock().await;                    
                     match writer.write(cmd.as_bytes()) {
                         Ok(0) => {
