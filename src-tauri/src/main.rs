@@ -61,7 +61,7 @@ async fn connect_with_password(settings: Settings, state: State<'_,AppState>) ->
         settings.server.as_str(), 
         settings.port, 
         settings.user.as_str(), 
-        settings.password.clone().unwrap().as_str()) {
+        settings.password.clone().unwrap().as_str()).await {
         Err(e) => {
             Err(e)
         },
@@ -91,7 +91,7 @@ async fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Resu
         settings.server.as_str(), 
         settings.port, 
         settings.user.as_str(), 
-        pkey.as_str()) {
+        pkey.as_str()).await {
         Err(e) => {
             println!("{e}");
             Err(e)
@@ -121,7 +121,7 @@ async fn setup_ssh(settings: Settings) -> Result<(), String> {
     let port = settings.port; 
     let user = settings.user.as_str();
     let password = settings.password.unwrap();
-    ssh::Ssh::setup_ssh(host, port, user, &password)
+    ssh::Ssh::setup_ssh(host, port, user, &password).await
 }
 
 #[tauri::command]
@@ -248,25 +248,29 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
 
     // read 
     {
-        let ssh = state.ssh.lock().await;  
-        let channel = ssh.channel.as_ref().unwrap();  
-        let reader = Arc::clone(&channel);
-        let tcp = ssh.tcp.as_ref().unwrap();
-        let tcpclone = tcp.try_clone().unwrap();
-        
-    
+        let reader;
+        let std_tcp;
+        {
+            let lock_ssh = state.ssh.lock().await;  
+            let channel = lock_ssh.channel.as_ref().unwrap();  
+            reader = Arc::clone(channel);
+            let tcp = lock_ssh.tcp.as_ref().unwrap();
+            let lock_tcp = tcp.lock().await;
+            std_tcp = lock_tcp.try_clone().unwrap();
+        }
         let mut buf = vec![0; 4096];
     
         tokio::spawn(async move {
         
             let mut poll = Poll::new().unwrap();
-            let mut mio_tcp = MioTcpStream::from_std(tcpclone);
+            let mut mio_tcp = MioTcpStream::from_std(std_tcp);
             poll.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             let mut events = Events::with_capacity(128);
                 
             loop {
-                //println!("Polling...");
+                println!("Polling...");
                 //events.clear();
+                // poll.poll(&mut events, Some(time::Duration::from_millis(10))).unwrap();
                 poll.poll(&mut events, None).unwrap();
                 //println!("Polling: data recieved");
             
@@ -293,7 +297,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         },
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                //println!("blocking reading, trying again");
+                                println!("blocking reading, trying again");
                                 thread::sleep(time::Duration::from_millis(WAIT_MS));
                                 // TODO: 
                                 // poll_for_new_data();

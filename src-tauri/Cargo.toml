@@ -12,16 +12,17 @@ tauri-build = { version = "1", features = [] }
 tauri = { version = "1", features = [ "window-all", "shell-open"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ssh2 = "0.9"
+ssh2 = "0.9.4"
 confy = "0.6"
 dirs = "5.0"
 chrono = "0.4"
-flume = "0.11"
+# flume = "0.11"
 tokio = { version = "1.38", features = ["full"] }
-tokio-macros = "2.3.0"
+# tokio-macros = "2.3.0"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
-mio = { version = "0.8.11", features = ["os-poll"] }
+mio = { version = "0.8.11", features = ["os-poll", "os-ext", "net"] }
+# windows-sys = { version = "0.52.0", features = ["Win32_Networking_WinSock", "Wdk_System_IO", "Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_System_WindowsProgramming", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2.7"

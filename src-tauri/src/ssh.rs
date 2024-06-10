@@ -14,8 +14,8 @@ const WAIT_MS: u64 = 20;
 
 #[derive(Default)]
 pub struct Ssh {
-    pub tcp: Option<TcpStream>,
     pub session : Option<Session>,
+    pub tcp: Option<Arc<Mutex<TcpStream>>>,    
     pub channel : Option<Arc<Mutex<Channel>>>,
     sftp : Option<Sftp>,
     host : String,
@@ -87,13 +87,13 @@ impl Ssh {
             Ok(())
         }
     }
-    fn transfer_public_key(host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
+    async fn transfer_public_key(host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
         let pubkeytext = std::fs::read_to_string(&Ssh::public_key_path()).unwrap().trim().to_string();
         let cmd = format!("exec sh -c \"cd; umask 077; mkdir -p .ssh; echo '{}' >> .ssh/authorized_keys\"",
                         pubkeytext);
         println!("{cmd}");
         let mut ssh = Ssh::new();
-        if let Err(e) = ssh.connect_with_password(host, port, user, password) {
+        if let Err(e) = ssh.connect_with_password(host, port, user, password).await {
             println!("Error transfering keys, login with password: {e}");
             return Err(e);
         }
@@ -105,19 +105,20 @@ impl Ssh {
         }
 
     }
-    fn test_ssh(host: &str, port: i16, user: &str) -> Result<(), String> {
+    async fn test_ssh(host: &str, port: i16, user: &str) -> Result<(), String> {
         if !Ssh::has_private_key() {
             return Err("No private key".to_string());
         }
         let pkey = Ssh::private_key_path();
         let mut ssh = Ssh::new();
-        if let Err(e) = ssh.connect_with_key(host, port, user, pkey.to_str().unwrap()) {
+        if let Err(e) = ssh.connect_with_key(
+            host, port, user, pkey.to_str().unwrap()).await {
             Err(e)
         } else {        
             Ok(())
         }
     }
-    pub fn setup_ssh(host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
+    pub async fn setup_ssh(host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
         if !Ssh::has_private_key() {
             if let Err(e) = Ssh::generate_keys() {
                 return Err(format!("Could not generate private key: {e}"));
@@ -128,11 +129,11 @@ impl Ssh {
                 return Err(format!("Could not generate public key: {e}"));
             }         
         }
-        if Ssh::test_ssh(host, port, user).is_err() {
-            if let Err(e) = Ssh::transfer_public_key(host, port, user, password) {
+        if Ssh::test_ssh(host, port, user).await.is_err() {
+            if let Err(e) = Ssh::transfer_public_key(host, port, user, password).await {
                 return Err(format!("Could not transfer public key: {e}"));
             }
-            if let Err(e) = Ssh::test_ssh(host, port, user) {
+            if let Err(e) = Ssh::test_ssh(host, port, user).await {
                 return Err(format!("Test ssh failed: {e}"));
             }
         }
@@ -170,17 +171,27 @@ impl Ssh {
         }
 
         let tcp = tcp.unwrap();
+        tcp.set_nonblocking(true).unwrap();
+        
         Ok(tcp)
     }
-    pub fn connect_with_password(&mut self, host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
+    pub async fn connect_with_password(&mut self, host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
         
         let tcp = match self._get_tcp(host, port) {
             Err(e) => return Err(e),
             Ok(o) => o,
         };
 
+        // clone tcp instance
+        let arc_tcp = Arc::new(Mutex::new(tcp));
+        let tcp_clone;
+        {
+            let locked_tcp = arc_tcp.lock().await;
+            tcp_clone = locked_tcp.try_clone().unwrap();
+        }  
+        
         let mut session = Session::new().unwrap();
-        session.set_tcp_stream(tcp);
+        session.set_tcp_stream(tcp_clone);
 
         if let Err(e) = session.handshake() {                
             return Err(format!("SSH handshake error: {}", e));
@@ -196,6 +207,9 @@ impl Ssh {
             Ok(o) => o,
         };
 
+        session.set_blocking(false);
+
+        self.tcp = Some(arc_tcp);
         self.session = Some(session);
         self.sftp = Some(sftp);
         self.host = host.to_string();
@@ -203,16 +217,23 @@ impl Ssh {
         self.password = password.to_string();
         Ok(())
     }
-    pub fn connect_with_key(&mut self, host: &str, port: i16, user: &str, pkey: &str) -> Result<(), String> {
+    pub async fn connect_with_key(&mut self, host: &str, port: i16, user: &str, pkey: &str) -> Result<(), String> {
         let tcp = match self._get_tcp(host, port) {
             Err(e) => return Err(e),
             Ok(o) => o,
         };
-        let tcp_clone = tcp.try_clone().unwrap();        
+        
+        // clone tcp instance
+        let arc_tcp = Arc::new(Mutex::new(tcp));
+        let tcp_clone;
+        {
+            let locked_tcp = arc_tcp.lock().await;
+            tcp_clone = locked_tcp.try_clone().unwrap();
+        }  
         
         let mut session = Session::new().unwrap();
-        session.set_tcp_stream(tcp);
-
+        session.set_tcp_stream(tcp_clone);
+        
         if let Err(e) = session.handshake() {
             return Err(format!("SSH handshake error: {}", e));
         }
@@ -232,7 +253,7 @@ impl Ssh {
 
         session.set_blocking(false);
 
-        self.tcp = Some(tcp_clone);
+        self.tcp = Some(arc_tcp);
         self.session = Some(session);
         self.sftp = Some(sftp);
         self.host = host.to_string();
@@ -306,7 +327,7 @@ impl Ssh {
                         println!("bloking..., trying again.");                        
                     }
                 }
-                Ok(o) => break
+                Ok(_) => break
             }
             thread::sleep(time::Duration::from_millis(WAIT_MS));
         }
@@ -542,27 +563,30 @@ mod tests {
         assert!(home.len()>0);
         (host, user, pass, home)
     }
-    #[test]
-    fn connect_with_password() {
+    #[tokio::test]
+    async fn connect_with_password() {
         let mut ssh = Ssh::new();
         let (host, user, pass, _) = get_params();
-        let r = ssh.connect_with_password(&host, PORT, &user, &pass);
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, &pass).await;
         assert!(r.is_ok());
     }
-    #[test]
-    fn connect_with_password_wrong() {
+    #[tokio::test]
+    async fn connect_with_password_wrong() {
         let mut ssh = Ssh::new();
         let (host, user, _, _) = get_params();
-        let r = ssh.connect_with_password(&host, PORT, &user, "wrong");
+        let r = ssh.connect_with_password(
+            &host, PORT, &user, "wrong").await;
         assert!(r.is_err());
     }
-    #[test]
-    fn connect_with_key() {
+    #[tokio::test]
+    async fn connect_with_key() {
         let mut ssh = Ssh::new();
         let (host, user, _, _) = get_params();
         let pkey = Ssh::private_key_path();
         let pkey = pkey.to_str().unwrap();
-        let r = ssh.connect_with_key(&host, PORT, &user, &pkey);
+        let r = ssh.connect_with_key(
+            &host, PORT, &user, &pkey).await;
         assert!(r.is_ok());
     }
     #[test]
@@ -625,10 +649,10 @@ mod tests {
         
     }
     
-    #[test]
-    fn setup_ssh() {
+    #[tokio::test]
+    async fn setup_ssh() {
         let (host, user, pass, _) = get_params();
-        assert!(Ssh::setup_ssh(&host, PORT, &user, &pass).is_ok());
+        assert!(Ssh::setup_ssh(&host, PORT, &user, &pass).await.is_ok());
     }
 
     #[test]
