@@ -8,16 +8,17 @@ mod settings;
 mod ssh;
 mod command;
 
-use std::{thread, time};
+use std::time;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use tauri::{Manager, Window};
 use tauri::State;
-use tokio::sync::{mpsc, Mutex};
-use flume::{Sender, Receiver};
-use mio::net::TcpStream as MioTcpStream;
-use mio::{Events, Interest, Poll, Token};
+use tokio::sync::Mutex;
+// use mio::net::TcpStream;
+// use mio::{Events, Interest, Poll, Token};
+use polling::{Event, Events, Poller};
 use settings::Settings;
+
 
 // use serde::{Deserialize, Serialize};
 // use chrono::prelude::{DateTime, NaiveDateTime, Utc};
@@ -262,48 +263,54 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let mut buf = vec![0; 4096];
         
         tokio::spawn(async move {
-            let mut poll = Poll::new().unwrap();
-            let mut mio_tcp = MioTcpStream::from_std(std_tcp);
-            poll.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
-            let mut events = Events::with_capacity(128);
-                
+            // let mut poller = Poll::new().unwrap();
+            // let mut mio_tcp = TcpStream::from_std(std_tcp);
+            // poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
+            //let mut events = Events::with_capacity(128);
+            
+            let poller = Poller::new().unwrap();
+            unsafe {poller.add(&std_tcp, Event::readable(1)).unwrap()};
+            let mut events = Events::new();
+
             loop {
                 println!("Polling...");
-                //events.clear();
-                // poll.poll(&mut events, Some(time::Duration::from_millis(10))).unwrap();
-                poll.poll(&mut events, None).unwrap();
+                events.clear();
+                poller.wait(&mut events, None).unwrap();
                 //println!("Polling: data recieved");
             
                 for ev in events.iter() {
                     println!("EVENT: {:?}", ev);
-                    let mut reader = reader.lock().await;
-                  
-                    match reader.read(&mut buf) {                                                      
-                        Ok(n) => { 
-                            if n == 0 {
-                                panic!("read is ZERO");
-                            }
-                            println!("Stdout: {:?}", &buf[0..n]);
-                            // let data = match String::from_utf8(buf[..n].to_vec()) {
-                            //     Ok(o) => o,
-                            //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
-                            // };
-                            //println!("result ({n}):\n{}", result.clone());  
-                            app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
-                            //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
-                            
-                        },
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                println!("blocking reading, trying again");
-                                tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
-                                // TODO: 
-                                // poll_for_new_data();
-                            } else {
-                                panic!("Cannot read channel: {e}");   
-                            }
-                        },
-                    }
+                    if ev.key == 1 {
+                        let mut reader = reader.lock().await;                    
+                        match reader.read(&mut buf) {                                                      
+                            Ok(n) => { 
+                                if n == 0 {
+                                    panic!("read is ZERO");
+                                }
+                                //println!("Stdout: {:?}", &buf[0..n]);
+                                // let data = match String::from_utf8(buf[..n].to_vec()) {
+                                //     Ok(o) => o,
+                                //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
+                                // };
+                                //println!("result ({n}):\n{}", result.clone());  
+                                app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
+                                //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
+                                
+                            },
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::WouldBlock {
+                                    println!("blocking reading, trying again");
+                                    tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
+                                    // TODO: 
+                                    // poll_for_new_data();
+                                } else {
+                                    panic!("Cannot read channel: {e}");   
+                                }
+                            },
+                        }
+                        poller.modify(&std_tcp, Event::readable(1)).unwrap();  
+                        // registry.reregister(connection, event.token(), Interest::READABLE)?                  
+                    }                    
                 };                                           
             }            
         });
@@ -315,11 +322,16 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
 
 #[tokio::main]
 async fn main() {
+    // use tracing_subscriber::{filter, fmt, prelude::*};
+    // tracing_subscriber::registry()
+    //     .with(filter::EnvFilter::from_default_env())
+    //     .with(fmt::Layer::default())
+    //     .init();
+    // tracing::debug!("Starting...");
+
+
     tauri::async_runtime::set(tokio::runtime::Handle::current());
-    //tracing_subscriber::fmt::try_init().unwrap();
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
-    tracing::info!("Starting...");
+
 
     tauri::Builder::default()     
         .setup(|app| {
