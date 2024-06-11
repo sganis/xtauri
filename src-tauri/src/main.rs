@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tauri::{Manager, Window};
 use tauri::State;
 use tokio::sync::{mpsc, Mutex};
+use flume::{Sender, Receiver};
 use mio::net::TcpStream as MioTcpStream;
 use mio::{Events, Interest, Poll, Token};
 use settings::Settings;
@@ -35,7 +36,7 @@ const WAIT_MS: u64 = 10;
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
-    itx: Mutex<Option<mpsc::Sender<String>>>,
+    itx: Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
 }
 
 // the payload type must implement `Serialize` and `Clone`.
@@ -192,13 +193,14 @@ fn zoom_window(window: tauri::Window, zoom: f64) {
 async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
     println!("key: {key}");
     let mutex = state.itx.lock().await;
-    mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())    
+    mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
     
-    let (itx, mut irx) = mpsc::channel(100);
+    let (itx, mut irx) = tokio::sync::mpsc::channel(100);
+    //let (itx, irx) = flume::unbounded();
     *state.itx.lock().await = Some(itx);
 
     // create tty shell
@@ -232,13 +234,13 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 println!("Channel write error: {}", e);
-                                thread::sleep(time::Duration::from_millis(WAIT_MS));         
-                                continue;
+                                tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;         
+                                //continue;
                             } else {
                                 panic!("Error reading from channel: {:?}", e);                                
                             }
                         }
-                    }                    
+                    }
                 }
             }        
         });      
@@ -248,7 +250,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     // read 
     {
         let reader;
-        let mut std_tcp;
+        let std_tcp;
         {
             let lock_ssh = state.ssh.lock().await;  
             let channel = lock_ssh.channel.as_ref().unwrap();  
@@ -258,12 +260,11 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             std_tcp = lock_tcp.try_clone().unwrap();
         }
         let mut buf = vec![0; 4096];
-    
-        tokio::spawn(async move {
         
+        tokio::spawn(async move {
             let mut poll = Poll::new().unwrap();
             let mut mio_tcp = MioTcpStream::from_std(std_tcp);
-            poll.registry().register(&mut std_tcp, Token(0), Interest::READABLE).unwrap();
+            poll.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             let mut events = Events::with_capacity(128);
                 
             loop {
@@ -273,12 +274,10 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                 poll.poll(&mut events, None).unwrap();
                 //println!("Polling: data recieved");
             
-                for _ev in events.iter() {
-                    //println!("EVENT: {:?}", ev);
-                    
+                for ev in events.iter() {
+                    println!("EVENT: {:?}", ev);
                     let mut reader = reader.lock().await;
-                    //let mut buf = vec![0; 1000];
-                    
+                  
                     match reader.read(&mut buf) {                                                      
                         Ok(n) => { 
                             if n == 0 {
@@ -297,17 +296,15 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 println!("blocking reading, trying again");
-                                thread::sleep(time::Duration::from_millis(WAIT_MS));
+                                tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
                                 // TODO: 
                                 // poll_for_new_data();
                             } else {
                                 panic!("Cannot read channel: {e}");   
                             }
                         },
-                    };                   
-                        
-                    
-                }
+                    }
+                };                                           
             }            
         });
     }
