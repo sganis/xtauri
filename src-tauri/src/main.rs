@@ -278,10 +278,12 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                 poller.wait(&mut events, None).unwrap();
                 //println!("Polling: data recieved");
             
+                let mut reader = reader.lock().await;    
+                
                 for ev in events.iter() {
                     println!("EVENT: {:?}", ev);
                     if ev.key == 1 {
-                        let mut reader = reader.lock().await;                    
+                                        
                         match reader.read(&mut buf) {                                                      
                             Ok(n) => { 
                                 if n == 0 {
