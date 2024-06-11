@@ -284,7 +284,8 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                     println!("EVENT: {:?}", ev);
                     if ev.token() == Token(0) {
 
-                        let mut reader = reader.lock().await;                            
+                        let mut reader = reader.lock().await;   
+                                                 
                         match reader.read(&mut buf) {                                                      
                             Ok(n) => { 
                                 if n == 0 {
@@ -313,7 +314,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         }
                         //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
                         // registry.reregister(connection, event.token(), Interest::READABLE)?                  
-                        //poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
+                        poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             
                     }                    
                 };                                           
