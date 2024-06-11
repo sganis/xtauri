@@ -14,9 +14,9 @@ use std::sync::Arc;
 use tauri::{Manager, Window};
 use tauri::State;
 use tokio::sync::Mutex;
-// use mio::net::TcpStream;
-// use mio::{Events, Interest, Poll, Token};
-use polling::{Event, Events, Poller};
+use mio::net::TcpStream;
+use mio::{Events, Interest, Poll, Token};
+//use polling::{Event, Events, Poller};
 use settings::Settings;
 
 
@@ -262,28 +262,29 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         }
         let mut buf = vec![0; 4096];
         
+
         tokio::spawn(async move {
-            // let mut poller = Poll::new().unwrap();
-            // let mut mio_tcp = TcpStream::from_std(std_tcp);
-            // poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
-            //let mut events = Events::with_capacity(128);
+            let mut poller = Poll::new().unwrap();
+            let mut mio_tcp = TcpStream::from_std(std_tcp);
+            poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
+            let mut events = Events::with_capacity(128);
             
-            let poller = Poller::new().unwrap();
-            unsafe {poller.add(&std_tcp, Event::readable(1)).unwrap()};
-            let mut events = Events::new();
+            // let poller = Poller::new().unwrap();
+            // unsafe {poller.add(&std_tcp, Event::readable(1)).unwrap()};
+            // let mut events = Events::new();    
 
             loop {
                 println!("Polling...");
-                events.clear();
-                poller.wait(&mut events, None).unwrap();
-                //println!("Polling: data recieved");
-            
-                let mut reader = reader.lock().await;    
+                //events.clear();
+                //poller.wait(&mut events, None).unwrap();
+                poller.poll(&mut events, None).unwrap();
+                //println!("Polling: data recieved");              
                 
-                for ev in events.iter() {
+                if let Some(ev) = events.iter().next() {
                     println!("EVENT: {:?}", ev);
-                    if ev.key == 1 {
-                                        
+                    if ev.token() == Token(0) {
+
+                        let mut reader = reader.lock().await;                            
                         match reader.read(&mut buf) {                                                      
                             Ok(n) => { 
                                 if n == 0 {
@@ -310,8 +311,10 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 }
                             },
                         }
-                        poller.modify(&std_tcp, Event::readable(1)).unwrap();  
+                        //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
                         // registry.reregister(connection, event.token(), Interest::READABLE)?                  
+                        //poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
+            
                     }                    
                 };                                           
             }            
