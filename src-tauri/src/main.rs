@@ -197,9 +197,8 @@ async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> 
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
-    //let (itx,mut irx): (Sender<String>, Receiver<String>) = flume::unbounded();
-    let (itx, mut irx): (mpsc::Sender<String>,mpsc::Receiver<String>) = mpsc::channel(100);
-
+    
+    let (itx, mut irx) = mpsc::channel(100);
     *state.itx.lock().await = Some(itx);
 
     // create tty shell
@@ -249,7 +248,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     // read 
     {
         let reader;
-        let std_tcp;
+        let mut std_tcp;
         {
             let lock_ssh = state.ssh.lock().await;  
             let channel = lock_ssh.channel.as_ref().unwrap();  
@@ -264,7 +263,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         
             let mut poll = Poll::new().unwrap();
             let mut mio_tcp = MioTcpStream::from_std(std_tcp);
-            poll.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
+            poll.registry().register(&mut std_tcp, Token(0), Interest::READABLE).unwrap();
             let mut events = Events::with_capacity(128);
                 
             loop {
@@ -316,18 +315,18 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     Ok(())
 
 }
+
 #[tokio::main]
 async fn main() {
     tauri::async_runtime::set(tokio::runtime::Handle::current());
+    //tracing_subscriber::fmt::try_init().unwrap();
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    tracing::info!("Starting...");
+
     tauri::Builder::default()     
         .setup(|app| {
             app.manage(AppState::default());
-
-            //app.emit_all("send-data", "output from rust".to_string()).unwrap();
-            //let handle = app.handle();
-            //let state: tauri::State<AppState> = handle.state();
-            //*state.itx.as_ref().unwrap().lock().unwrap() = itx;
-            //*state.irx.as_ref().unwrap().lock().unwrap() = irx;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
