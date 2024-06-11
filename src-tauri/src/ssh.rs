@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::io::{Read, BufReader, Write, BufWriter};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 use super::command;
@@ -15,7 +15,7 @@ const WAIT_MS: u64 = 20;
 #[derive(Default)]
 pub struct Ssh {
     pub session : Option<Session>,
-    pub tcp: Option<Arc<Mutex<TcpStream>>>,    
+    pub tcp: Option<Arc<TcpStream>>,    
     pub channel : Option<Arc<Mutex<Channel>>>,
     sftp : Option<Sftp>,
     host : String,
@@ -139,59 +139,65 @@ impl Ssh {
         }
         Ok(())
     }
-    fn _get_tcp(&mut self, host: &str, port: i16) -> Result<TcpStream, String> {
-        let timeout = Duration::new(5, 0); // 5 secs
-        let addresses: Vec<_> = match format!("{}:{}", host, port).to_socket_addrs() {
-            Err(e) => {
-                println!("Unable to resolve address: {}:{}  {:?}",host, port, e);
-                return Err(e.to_string())
-            },
-            Ok(o) => o.collect(),
-        };
-        let mut tcp = None;
-        let mut error = String::new();
-
-        for addr in addresses {
-            match TcpStream::connect_timeout(&addr, timeout) {
-                Err(e) => {
-                    //error.push_str(&format!("tcp error: {:?}\n", e));
-                    error = String::from(&format!("tcp error: {:?}", e));
-                    continue;
-                },
-                Ok(o) => {
-                    println!("connected to: {:?}", addr);
-                    tcp = Some(o);
-                    break;  
-                },
-            };
+    async fn _get_tcp(&mut self, host: &str, port: i16) -> Result<TcpStream, String> {
+        let tcp = match tokio::time::timeout(
+            Duration::from_secs(5), // 5 secs
+            tokio::net::TcpStream::connect(&format!("{host}:{port}"))
+        )
+        .await
+        {
+            Ok(ok) => ok,
+            Err(e) => panic!("timeout while connecting to server : {:?}", e),
         }
+        .expect("Error while connecting to server");
 
-        if tcp.is_none() {
-            return Err(error);
-        }
+        // let addresses: Vec<_> = match format!("{}:{}", host, port).to_socket_addrs() {
+        //     Err(e) => {
+        //         println!("Unable to resolve address: {}:{}  {:?}",host, port, e);
+        //         return Err(e.to_string())
+        //     },
+        //     Ok(o) => o.collect(),
+        // };
+        // let mut tcp = None;
+        // let mut error = String::new();
 
-        let tcp = tcp.unwrap();
-        tcp.set_nonblocking(true).unwrap();
+        // for addr in addresses {
+        //     match TcpStream::connect_timeout(&addr, timeout) {
+        //         Err(e) => {
+        //             //error.push_str(&format!("tcp error: {:?}\n", e));
+        //             error = String::from(&format!("tcp error: {:?}", e));
+        //             continue;
+        //         },
+        //         Ok(o) => {
+        //             println!("connected to: {:?}", addr);
+        //             tcp = Some(o);
+        //             break;  
+        //         },
+        //     };
+        // }
+
+        // if tcp.is_none() {
+        //     return Err(error);
+        // }
+
+        // let tcp = tcp.unwrap();
+        //tcp.set_nonblocking(true).unwrap();
         
         Ok(tcp)
     }
     pub async fn connect_with_password(&mut self, host: &str, port: i16, user: &str, password: &str) -> Result<(), String> {
         
-        let tcp = match self._get_tcp(host, port) {
+        let tcp = match self._get_tcp(host, port).await {
             Err(e) => return Err(e),
             Ok(o) => o,
         };
 
         // clone tcp instance
-        let arc_tcp = Arc::new(Mutex::new(tcp));
-        let tcp_clone;
-        {
-            let locked_tcp = arc_tcp.lock().await;
-            tcp_clone = locked_tcp.try_clone().unwrap();
-        }  
+        let arc_tcp = Arc::new(tcp);
+        let arc_tcp_clone = arc_tcp.clone();
         
         let mut session = Session::new().unwrap();
-        session.set_tcp_stream(tcp_clone);
+        session.set_tcp_stream(arc_tcp);
 
         if let Err(e) = session.handshake() {                
             return Err(format!("SSH handshake error: {}", e));
@@ -209,7 +215,7 @@ impl Ssh {
 
         session.set_blocking(false);
 
-        self.tcp = Some(arc_tcp);
+        self.tcp = Some(arc_tcp_clone);
         self.session = Some(session);
         self.sftp = Some(sftp);
         self.host = host.to_string();
@@ -218,21 +224,17 @@ impl Ssh {
         Ok(())
     }
     pub async fn connect_with_key(&mut self, host: &str, port: i16, user: &str, pkey: &str) -> Result<(), String> {
-        let tcp = match self._get_tcp(host, port) {
+        let tcp = match self._get_tcp(host, port).await {
             Err(e) => return Err(e),
             Ok(o) => o,
         };
         
         // clone tcp instance
-        let arc_tcp = Arc::new(Mutex::new(tcp));
-        let tcp_clone;
-        {
-            let locked_tcp = arc_tcp.lock().await;
-            tcp_clone = locked_tcp.try_clone().unwrap();
-        }  
+        let arc_tcp = Arc::new(tcp);
+        let arc_tcp_clone = arc_tcp.clone();
         
         let mut session = Session::new().unwrap();
-        session.set_tcp_stream(tcp_clone);
+        session.set_tcp_stream(arc_tcp);
         
         if let Err(e) = session.handshake() {
             return Err(format!("SSH handshake error: {}", e));
@@ -253,7 +255,7 @@ impl Ssh {
 
         session.set_blocking(false);
 
-        self.tcp = Some(arc_tcp);
+        self.tcp = Some(arc_tcp_clone);
         self.session = Some(session);
         self.sftp = Some(sftp);
         self.host = host.to_string();

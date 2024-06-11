@@ -14,8 +14,7 @@ use std::sync::Arc;
 use tauri::{Manager, Window};
 use tauri::State;
 use tokio::sync::{mpsc, Mutex};
-use mio::net::TcpStream as MioTcpStream;
-use mio::{Events, Interest, Poll, Token};
+use tokio::io::Interest;
 use settings::Settings;
 
 // use serde::{Deserialize, Serialize};
@@ -190,7 +189,7 @@ fn zoom_window(window: tauri::Window, zoom: f64) {
 
 #[tauri::command]
 async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
-    println!("key: {key}");
+    //println!("key: {key}");
     let mutex = state.itx.lock().await;
     mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())    
 }
@@ -248,43 +247,35 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     // read 
     {
         let reader;
-        let mut std_tcp;
+        let tcp;
         {
             let lock_ssh = state.ssh.lock().await;  
             let channel = lock_ssh.channel.as_ref().unwrap();  
             reader = Arc::clone(channel);
-            let tcp = lock_ssh.tcp.as_ref().unwrap();
-            let lock_tcp = tcp.lock().await;
-            std_tcp = lock_tcp.try_clone().unwrap();
+            let arc_tcp = lock_ssh.tcp.as_ref().unwrap();  
+            tcp = arc_tcp.clone();
         }
         let mut buf = vec![0; 4096];
     
         tokio::spawn(async move {
         
-            let mut poll = Poll::new().unwrap();
-            let mut mio_tcp = MioTcpStream::from_std(std_tcp);
-            poll.registry().register(&mut std_tcp, Token(0), Interest::READABLE).unwrap();
-            let mut events = Events::with_capacity(128);
+            // let mut poll = Poll::new().unwrap();
+            // poll.registry().register(tcp, Token(0), Interest::READABLE).unwrap();
+            // let mut events = Events::with_capacity(128);
                 
             loop {
-                println!("Polling...");
-                //events.clear();
-                // poll.poll(&mut events, Some(time::Duration::from_millis(10))).unwrap();
-                poll.poll(&mut events, None).unwrap();
-                //println!("Polling: data recieved");
-            
-                for _ev in events.iter() {
-                    //println!("EVENT: {:?}", ev);
-                    
+                let ready = tcp.ready(Interest::READABLE | Interest::WRITABLE).await.unwrap();
+                if ready.is_readable() {
+                    //println!("data ready in tcp stream ready to read");
+
                     let mut reader = reader.lock().await;
-                    //let mut buf = vec![0; 1000];
                     
                     match reader.read(&mut buf) {                                                      
                         Ok(n) => { 
                             if n == 0 {
                                 panic!("read is ZERO");
                             }
-                            println!("Stdout: {:?}", &buf[0..n]);
+                            //println!("Stdout: {:?}", &buf[0..n]);
                             // let data = match String::from_utf8(buf[..n].to_vec()) {
                             //     Ok(o) => o,
                             //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
@@ -296,19 +287,18 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         },
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                println!("blocking reading, trying again");
+                                //println!("blocking reading, trying again");
                                 thread::sleep(time::Duration::from_millis(WAIT_MS));
                                 // TODO: 
                                 // poll_for_new_data();
+                                continue;
                             } else {
                                 panic!("Cannot read channel: {e}");   
                             }
-                        },
-                    };                   
-                        
-                    
-                }
-            }            
+                        }
+                    }     
+                }   
+            }        
         });
     }
 
