@@ -24,6 +24,9 @@ body {
 .border-yellow {
   border: 1px solid yellow ;
 }
+.border-gray {
+  border: 1px solid gray ;
+}
 
 
 

@@ -8,15 +8,17 @@ mod settings;
 mod ssh;
 mod command;
 
-use std::{thread, time};
+use std::time;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use tauri::{Manager, Window};
 use tauri::State;
-use tokio::sync::{mpsc, Mutex};
-use mio::net::TcpStream as MioTcpStream;
+use tokio::sync::Mutex;
+use mio::net::TcpStream;
 use mio::{Events, Interest, Poll, Token};
+//use polling::{Event, Events, Poller};
 use settings::Settings;
+
 
 // use serde::{Deserialize, Serialize};
 // use chrono::prelude::{DateTime, NaiveDateTime, Utc};
@@ -35,7 +37,7 @@ const WAIT_MS: u64 = 10;
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
-    itx: Mutex<Option<mpsc::Sender<String>>>,
+    itx: Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
 }
 
 // the payload type must implement `Serialize` and `Clone`.
@@ -192,13 +194,14 @@ fn zoom_window(window: tauri::Window, zoom: f64) {
 async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
     println!("key: {key}");
     let mutex = state.itx.lock().await;
-    mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())    
+    mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
     
-    let (itx, mut irx) = mpsc::channel(100);
+    let (itx, mut irx) = tokio::sync::mpsc::channel(100);
+    //let (itx, irx) = flume::unbounded();
     *state.itx.lock().await = Some(itx);
 
     // create tty shell
@@ -232,13 +235,13 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 println!("Channel write error: {}", e);
-                                thread::sleep(time::Duration::from_millis(WAIT_MS));         
-                                continue;
+                                tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;         
+                                //continue;
                             } else {
                                 panic!("Error reading from channel: {:?}", e);                                
                             }
                         }
-                    }                    
+                    }
                 }
             }        
         });      
@@ -248,7 +251,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     // read 
     {
         let reader;
-        let mut std_tcp;
+        let std_tcp;
         {
             let lock_ssh = state.ssh.lock().await;  
             let channel = lock_ssh.channel.as_ref().unwrap();  
@@ -258,56 +261,63 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             std_tcp = lock_tcp.try_clone().unwrap();
         }
         let mut buf = vec![0; 4096];
-    
-        tokio::spawn(async move {
         
-            let mut poll = Poll::new().unwrap();
-            let mut mio_tcp = MioTcpStream::from_std(std_tcp);
-            poll.registry().register(&mut std_tcp, Token(0), Interest::READABLE).unwrap();
+
+        tokio::spawn(async move {
+            let mut poller = Poll::new().unwrap();
+            let mut mio_tcp = TcpStream::from_std(std_tcp);
+            poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             let mut events = Events::with_capacity(128);
-                
+            
+            // let poller = Poller::new().unwrap();
+            // unsafe {poller.add(&std_tcp, Event::readable(1)).unwrap()};
+            // let mut events = Events::new();    
+
             loop {
                 println!("Polling...");
                 //events.clear();
-                // poll.poll(&mut events, Some(time::Duration::from_millis(10))).unwrap();
-                poll.poll(&mut events, None).unwrap();
-                //println!("Polling: data recieved");
+                //poller.wait(&mut events, None).unwrap();
+                poller.poll(&mut events, None).unwrap();
+                //println!("Polling: data recieved");              
+                
+                if let Some(ev) = events.iter().next() {
+                    println!("EVENT: {:?}", ev);
+                    if ev.token() == Token(0) {
+
+                        let mut reader = reader.lock().await;   
+                                                 
+                        match reader.read(&mut buf) {                                                      
+                            Ok(n) => { 
+                                if n == 0 {
+                                    panic!("read is ZERO");
+                                }
+                                //println!("Stdout: {:?}", &buf[0..n]);
+                                // let data = match String::from_utf8(buf[..n].to_vec()) {
+                                //     Ok(o) => o,
+                                //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
+                                // };
+                                //println!("result ({n}):\n{}", result.clone());  
+                                app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
+                                //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
+                                
+                            },
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::WouldBlock {
+                                    println!("blocking reading, trying again");
+                                    tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
+                                    // TODO: 
+                                    // poll_for_new_data();
+                                } else {
+                                    panic!("Cannot read channel: {e}");   
+                                }
+                            },
+                        }
+                        //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
+                        // registry.reregister(connection, event.token(), Interest::READABLE)?                  
+                        poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             
-                for _ev in events.iter() {
-                    //println!("EVENT: {:?}", ev);
-                    
-                    let mut reader = reader.lock().await;
-                    //let mut buf = vec![0; 1000];
-                    
-                    match reader.read(&mut buf) {                                                      
-                        Ok(n) => { 
-                            if n == 0 {
-                                panic!("read is ZERO");
-                            }
-                            println!("Stdout: {:?}", &buf[0..n]);
-                            // let data = match String::from_utf8(buf[..n].to_vec()) {
-                            //     Ok(o) => o,
-                            //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
-                            // };
-                            //println!("result ({n}):\n{}", result.clone());  
-                            app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
-                            //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
-                            
-                        },
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                println!("blocking reading, trying again");
-                                thread::sleep(time::Duration::from_millis(WAIT_MS));
-                                // TODO: 
-                                // poll_for_new_data();
-                            } else {
-                                panic!("Cannot read channel: {e}");   
-                            }
-                        },
-                    };                   
-                        
-                    
-                }
+                    }                    
+                };                                           
             }            
         });
     }
@@ -318,11 +328,16 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
 
 #[tokio::main]
 async fn main() {
+    // use tracing_subscriber::{filter, fmt, prelude::*};
+    // tracing_subscriber::registry()
+    //     .with(filter::EnvFilter::from_default_env())
+    //     .with(fmt::Layer::default())
+    //     .init();
+    // tracing::debug!("Starting...");
+
+
     tauri::async_runtime::set(tokio::runtime::Handle::current());
-    //tracing_subscriber::fmt::try_init().unwrap();
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
-    tracing::info!("Starting...");
+
 
     tauri::Builder::default()     
         .setup(|app| {

@@ -70,7 +70,7 @@
 
 </script>
 
-<div class="d-flex flex-column flex-grow-1 term-container border h100">
+<div class="d-flex flex-column flex-grow-1 term-container h100">
     <div class="terminal" bind:this={termEl} />
 </div>
 

@@ -538,7 +538,7 @@ impl Ssh {
         let mut channel = session.channel_session().unwrap();
         channel.request_pty("xterm-256color", None, None).unwrap();
         channel.shell().unwrap();
-        self.channel = Some(Arc::new(tokio::sync::Mutex::new(channel)));
+        self.channel = Some(Arc::new(Mutex::new(channel)));
         session.set_blocking(false);
         Ok(())
     }
