@@ -4,9 +4,8 @@
     import "@xterm/xterm/css/xterm.css";
     import { Terminal }  from '@xterm/xterm';
     import { FitAddon } from "@xterm/addon-fit";
-    import { invoke } from "@tauri-apps/api/tauri";
-    import { appWindow } from '@tauri-apps/api/window'
-    // import { emit, listen } from '@tauri-apps/api/event';
+    import { invoke } from "@tauri-apps/api/core";
+    import { getCurrent } from '@tauri-apps/api/window'
     import {createEventDispatcher, onMount} from 'svelte';
     const dispatch = createEventDispatcher();
 
@@ -57,14 +56,20 @@
             //fit.fit();
         });
 
-        appWindow.listen("terminal-output", ({payload}) => {
+        let window = getCurrent();
+        window.listen("terminal-output", ({payload}) => {
             term.write(payload.data);
         });
-        appWindow.onResized(({ payload: size }) => {
+        window.onResized(({ payload: size }) => {
             fit.fit();
         })
 
-        await invoke('open_terminal');
+        try {
+            let r = await invoke('open_terminal');
+            console.log(r);
+        } catch (e) {
+            console.log('error starting terminal: ', e);
+        }
 
     });
 

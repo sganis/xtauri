@@ -1,8 +1,8 @@
 <script>
   // @ts-nocheck
       import Login from "./Login.svelte";
-      import { invoke } from "@tauri-apps/api/tauri"
-      import { downloadDir, appDataDir } from '@tauri-apps/api/path';
+      import { invoke } from "@tauri-apps/api/core"
+    //   import { downloadDir, appDataDir } from '@tauri-apps/api/path';
       import {FileStore, PageStore, FileViewStore, FilePageStore,
           UserStore, CurrentPath, FileRequested,JsonChanged,JsonData,JsonNewData,
           Message, Error, Progress} from '../js/store'

@@ -165,7 +165,7 @@ async fn upload(
 }
 
 #[tauri::command]
-fn zoom_window(window: tauri::Window, zoom: f64) {
+fn zoom_window(window: tauri::WebviewWindow, zoom: f64) {
     //println!("zoom window: {zoom}");
 
     let _ = window.with_webview(move |webview| {
@@ -278,14 +278,13 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                 //events.clear();
                 //poller.wait(&mut events, None).unwrap();
                 poller.poll(&mut events, None).unwrap();
-                //println!("Polling: data recieved");              
-                
+                //println!("Polling: data recieved");      
+
+                let mut reader = reader.lock().await;   
+
                 if let Some(ev) = events.iter().next() {
                     println!("EVENT: {:?}", ev);
                     if ev.token() == Token(0) {
-
-                        let mut reader = reader.lock().await;   
-                                                 
                         match reader.read(&mut buf) {                                                      
                             Ok(n) => { 
                                 if n == 0 {
@@ -297,14 +296,12 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
                                 // };
                                 //println!("result ({n}):\n{}", result.clone());  
-                                app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
-                                //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
-                                
+                                app.emit("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                                                 
                             },
                             Err(e) => {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
                                     println!("blocking reading, trying again");
-                                    tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
+                                    //tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
                                     // TODO: 
                                     // poll_for_new_data();
                                 } else {
@@ -312,8 +309,9 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 }
                             },
                         }
+
                         //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
-                        // registry.reregister(connection, event.token(), Interest::READABLE)?                  
+                        // this must be done in windows
                         poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             
                     }                    
@@ -321,6 +319,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             }            
         });
     }
+    println!("Terminal started.");
 
     Ok(())
 

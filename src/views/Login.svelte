@@ -1,5 +1,5 @@
 <script>
-  import { invoke } from "@tauri-apps/api/tauri"
+  import { invoke } from "@tauri-apps/api/core"
   import {createEventDispatcher, onMount} from 'svelte'
   import {UserStore, Message, Error} from '../js/store'
   import Spinner from '../lib/Spinner.svelte'

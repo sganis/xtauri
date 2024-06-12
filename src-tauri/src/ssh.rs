@@ -367,14 +367,14 @@ impl Ssh {
                     let percent = ((count as f64/size as f64) * 100.)  as i32;
                     if prev_percent != percent {
                         let p = percent as f32 / 100.;
-                        window.emit("PROGRESS", Payload { percent: p }).unwrap();
+                        //window.emit("PROGRESS", Payload { percent: p }).unwrap();
                         prev_percent = percent;
                     }
                 }
             }
         }
         println!("written: {count}");
-        window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
+        //window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
         Ok("done".to_string())
     }
     pub fn scp_upload(&mut self, localpath: &str, remotepath: &str, window: tauri::Window) -> Result<String, String> {
@@ -409,13 +409,13 @@ impl Ssh {
             let percent = ((count as f64/size as f64) * 100.)  as i32;
             if prev_percent != percent {
                 let p = percent as f32 / 100.;
-                window.emit("PROGRESS", Payload { percent: p }).unwrap();
+                //window.emit("PROGRESS", Payload { percent: p }).unwrap();
                 prev_percent = percent;
             }
         }
         
         println!("written: {count}");
-        window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
+        //window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
         Ok("done".to_string())
     }
     pub fn sftp_stat(&mut self, filename: &str) -> Result<FileStat, String> {

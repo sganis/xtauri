@@ -1,7 +1,7 @@
 <script>
 // @ts-nocheck
 
-    import {invoke} from "@tauri-apps/api/tauri"
+    import {invoke} from "@tauri-apps/api/core"
     import {getVersion} from '@tauri-apps/api/app';
     import {onMount} from 'svelte';
     import {UserStore} from '../../js/store'
