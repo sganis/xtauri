@@ -5,7 +5,7 @@
     import { Terminal }  from '@xterm/xterm';
     import { FitAddon } from "@xterm/addon-fit";
     import { invoke } from "@tauri-apps/api/core";
-    import { getCurrent } from '@tauri-apps/api/window'
+    import { getCurrentWindow } from '@tauri-apps/api/window'
     import {createEventDispatcher, onMount} from 'svelte';
     const dispatch = createEventDispatcher();
 
@@ -56,7 +56,7 @@
             //fit.fit();
         });
 
-        let window = getCurrent();
+        let window = getCurrentWindow();
         window.listen("terminal-output", ({payload}) => {
             term.write(payload.data);
         });
