@@ -11,8 +11,7 @@ mod command;
 use std::time;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use tauri::{Manager, Window};
-use tauri::State;
+use tauri::{Manager, Window, Emitter, State};
 use tokio::sync::Mutex;
 use mio::net::TcpStream;
 use mio::{Events, Interest, Poll, Token};
@@ -325,8 +324,8 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
 
 }
 
-#[tokio::main]
-async fn main() {
+//#[tokio::main]
+fn main() {
     // use tracing_subscriber::{filter, fmt, prelude::*};
     // tracing_subscriber::registry()
     //     .with(filter::EnvFilter::from_default_env())
@@ -335,7 +334,7 @@ async fn main() {
     // tracing::debug!("Starting...");
 
 
-    tauri::async_runtime::set(tokio::runtime::Handle::current());
+    //tauri::async_runtime::set(tokio::runtime::Handle::current());
 
 
     tauri::Builder::default()     

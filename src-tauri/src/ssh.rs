@@ -335,7 +335,7 @@ impl Ssh {
         println!("stdout: {output}");
         Ok(output)
     }
-    pub fn scp_download(&mut self, remotepath: &str, localpath: &str, window: tauri::Window) -> Result<String, String> {
+    pub fn scp_download(&mut self, remotepath: &str, localpath: &str, _window: tauri::Window) -> Result<String, String> {
         println!("downloading: {remotepath}");
         let (mut channel, stat) = match self.session.as_ref().unwrap()
             .scp_recv(Path::new(remotepath)) {
@@ -366,7 +366,7 @@ impl Ssh {
                     // report progress
                     let percent = ((count as f64/size as f64) * 100.)  as i32;
                     if prev_percent != percent {
-                        let p = percent as f32 / 100.;
+                        let _p = percent as f32 / 100.;
                         //window.emit("PROGRESS", Payload { percent: p }).unwrap();
                         prev_percent = percent;
                     }
@@ -377,7 +377,7 @@ impl Ssh {
         //window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
         Ok("done".to_string())
     }
-    pub fn scp_upload(&mut self, localpath: &str, remotepath: &str, window: tauri::Window) -> Result<String, String> {
+    pub fn scp_upload(&mut self, localpath: &str, remotepath: &str, _window: tauri::Window) -> Result<String, String> {
         println!("uploading: {localpath} to {remotepath}");
         let size = std::fs::metadata(localpath).unwrap().len();
         let mut channel = match self.session.as_ref().unwrap()
@@ -408,7 +408,7 @@ impl Ssh {
             // report progress
             let percent = ((count as f64/size as f64) * 100.)  as i32;
             if prev_percent != percent {
-                let p = percent as f32 / 100.;
+                let _p = percent as f32 / 100.;
                 //window.emit("PROGRESS", Payload { percent: p }).unwrap();
                 prev_percent = percent;
             }

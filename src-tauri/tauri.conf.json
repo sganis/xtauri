@@ -17,8 +17,8 @@
     ]
   },
   "productName": "xtauri",
-  "version": "0.0.0",
-  "identifier": "com.tauri.dev",
+  "version": "1.0.0",
+  "identifier": "com.tauri.xtauri",
   "plugins": {},
   "app": {
     "security": {
