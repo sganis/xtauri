@@ -21,7 +21,7 @@ tokio = { version = "1.38", features = ["full", "mio"] }
 # tracing-subscriber = "0.3"
 mio = { version = "1.0.2", features = ["os-poll", "os-ext", "net"] }
 polling = "3.7.1"
-system-deps = "6.2.2"
+system-deps = "7.0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2.7"

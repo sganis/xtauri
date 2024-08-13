@@ -324,8 +324,8 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
 
 }
 
-//#[tokio::main]
-fn main() {
+#[tokio::main]
+async fn main() {
     // use tracing_subscriber::{filter, fmt, prelude::*};
     // tracing_subscriber::registry()
     //     .with(filter::EnvFilter::from_default_env())
@@ -334,7 +334,7 @@ fn main() {
     // tracing::debug!("Starting...");
 
 
-    //tauri::async_runtime::set(tokio::runtime::Handle::current());
+    tauri::async_runtime::set(tokio::runtime::Handle::current());
 
 
     tauri::Builder::default()     
