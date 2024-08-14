@@ -5,8 +5,7 @@ use std::time::Duration;
 use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc,Mutex};
 
 use super::command;
 
@@ -186,7 +185,7 @@ impl Ssh {
         let arc_tcp = Arc::new(Mutex::new(tcp));
         let tcp_clone;
         {
-            let locked_tcp = arc_tcp.lock().await;
+            let locked_tcp = arc_tcp.lock().unwrap();
             tcp_clone = locked_tcp.try_clone().unwrap();
         }  
         
@@ -227,7 +226,7 @@ impl Ssh {
         let arc_tcp = Arc::new(Mutex::new(tcp));
         let tcp_clone;
         {
-            let locked_tcp = arc_tcp.lock().await;
+            let locked_tcp = arc_tcp.lock().unwrap();
             tcp_clone = locked_tcp.try_clone().unwrap();
         }  
         
@@ -541,6 +540,12 @@ impl Ssh {
         self.channel = Some(Arc::new(Mutex::new(channel)));
         session.set_blocking(false);
         Ok(())
+    }
+    pub fn channel_shell_size(&mut self, cols: u32, rows: u32) -> Result<(), String> {
+        match self.channel.as_ref().unwrap().lock().unwrap().request_pty_size(cols, rows, None, None){
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Error resizing terminal: {:?}", e.message()))
+        }
     }
 }
 
