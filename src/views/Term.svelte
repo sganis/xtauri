@@ -35,6 +35,7 @@
         fit.fit();
 
         term.onData(async (data) => {
+            console.log('onData:', data);
             await invoke("send_key", {key: data});
         });
 
@@ -56,10 +57,22 @@
             //fit.fit();
         });
 
+        const BUFFER = 100000;
+        let bytes_read = 0;
         let window = getCurrentWindow();
+        
         window.listen("terminal-output", ({payload}) => {
+            console.log('data: ', payload.data.length, bytes_read, 
+            term._core.buffer.x, term._core.buffer.y);
+            bytes_read += payload.data.length;
             term.write(payload.data);
+            if (bytes_read > BUFFER) {
+                console.log('clearing buffer...');
+                bytes_read = 0;
+                //term.clear();
+            }
         });
+
         window.onResized(({ payload: size }) => {
             fit.fit();
         })

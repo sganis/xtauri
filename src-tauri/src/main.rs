@@ -266,18 +266,12 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             let mut poller = Poll::new().unwrap();
             let mut mio_tcp = TcpStream::from_std(std_tcp);
             poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
-            let mut events = Events::with_capacity(128);
-            
-            // let poller = Poller::new().unwrap();
-            // unsafe {poller.add(&std_tcp, Event::readable(1)).unwrap()};
-            // let mut events = Events::new();    
+            let mut events = Events::with_capacity(1000);
 
             loop {
                 println!("Polling...");
-                //events.clear();
-                //poller.wait(&mut events, None).unwrap();
                 poller.poll(&mut events, None).unwrap();
-                //println!("Polling: data recieved");      
+                println!("Polling: data recieved");      
 
                 let mut reader = reader.lock().await;   
 
@@ -295,7 +289,19 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
                                 // };
                                 //println!("result ({n}):\n{}", result.clone());  
+                                
                                 app.emit("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                                                 
+                                // let chunk_size = 1000;
+                                // let total_chunks = (buf.len() + chunk_size - 1) / chunk_size;
+
+                                // for i in 0..total_chunks {
+                                //     let start = i * chunk_size;
+                                //     let end = std::cmp::min(start + chunk_size, buf.len());  
+                                //     println!("chunk {} {} {}", i, start, end);                                                 
+                                //     app.emit("terminal-output", Payload {data: buf[start..end].to_vec()}).unwrap();                                                                 
+                            
+                                // }
+                            
                             },
                             Err(e) => {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -308,13 +314,10 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 }
                             },
                         }
-
-                        //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
                         // this must be done in windows
                         poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
-            
                     }                    
-                };                                           
+                };                                       
             }            
         });
     }

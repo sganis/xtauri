@@ -14,21 +14,6 @@
   
       let zoom = 1.0;
   
-      // close splash
-      // tauri.conf.js
-      // {
-      //     "width": 600,
-      //     "height": 400,
-      //     "center": true,
-      //     "decorations": false,
-      //     "url": "splash.html",
-      //     "theme": "Dark",
-      //     "label": "splash"
-      //   }
-      //document.addEventListener('DOMContentLoaded', () => {
-      //   invoke('close_splash')
-      //})
-  
       // @ts-ignore
       const login = async (e) => {
           let args = e.detail
