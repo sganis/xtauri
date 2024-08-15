@@ -1,6 +1,5 @@
 <script>
 // @ts-nocheck
-
     import "@xterm/xterm/css/xterm.css";
     import { Terminal }  from '@xterm/xterm';
     import { FitAddon } from "@xterm/addon-fit";
@@ -8,22 +7,18 @@
     import { getCurrentWindow } from '@tauri-apps/api/window'
     import {createEventDispatcher, onMount} from 'svelte';
     const dispatch = createEventDispatcher();
-
-    
-    
     let termEl;
     let term;
 
     onMount(async () => {
         //console.log('term mounted');
-
-       
-        
         term = new Terminal({ 
             cursorBlink: true, 
             convertEol: true,            
             fontFamily: "monospace",
             fontSize: 20,
+            cols: 120,
+            rows: 40,
         });
 
         term.write('Connecting... \n\n');
@@ -35,7 +30,7 @@
         fit.fit();
 
         term.onData(async (data) => {
-            console.log('onData:', data);
+            //console.log('onData:', data);
             await invoke("send_key", {key: data});
         });
 
@@ -48,32 +43,23 @@
         term.onSelectionChange(() => {
             //console.log('onSelectionChange');
         });
-        term.onResize(e => {
-            //console.log('onResize', e);
-            // websocket.send({ rows: evt.rows });
+        term.onResize(async (e) => {
+            console.log('onResize', e.colos, e.rows);
+            await invoke("resize", {cols: e.cols, rows: e.rows});
         });
         term.onRender (() => {
             //console.log('rendering');
-            //fit.fit();
+            fit.fit();
         });
 
-        const BUFFER = 100000;
-        let bytes_read = 0;
         let window = getCurrentWindow();
         
         window.listen("terminal-output", ({payload}) => {
-            console.log('data: ', payload.data.length, bytes_read, 
-            term._core.buffer.x, term._core.buffer.y);
-            bytes_read += payload.data.length;
             term.write(payload.data);
-            if (bytes_read > BUFFER) {
-                console.log('clearing buffer...');
-                bytes_read = 0;
-                //term.clear();
-            }
         });
 
         window.onResized(({ payload: size }) => {
+            console.log('windows resized:', size);
             fit.fit();
         })
 
