@@ -44,7 +44,7 @@
             //console.log('onSelectionChange');
         });
         term.onResize(async (e) => {
-            console.log('onResize', e.colos, e.rows);
+            //console.log('onResize', e.colos, e.rows);
             await invoke("resize", {cols: e.cols, rows: e.rows});
         });
         term.onRender (() => {
@@ -59,7 +59,7 @@
         });
 
         window.onResized(({ payload: size }) => {
-            console.log('windows resized:', size);
+            //console.log('windows resized:', size);
             fit.fit();
         })
 
@@ -81,12 +81,13 @@
 
 <style>
 .term-container {
-    /* height: calc(100vh - 144px); */
+    height: calc(100vh - 144px);
     /* box-sizing: border-box;   */
     background-color: #101010;
     margin: 0;
     padding: 10px 10px 2px 10px;  
     /* padding-bottom: 0px; */
+    /* border: 1px solid red; */
 }
 .terminal {
     width: 100%;

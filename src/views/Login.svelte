@@ -21,13 +21,13 @@
     }
 	});
 
-    const handleSubmit = async () => {
-      $Error = '';
-      $Message = "Connecting...";
-      $UserStore.isConnecting = true;
-      //await sleep(1000);
-      dispatch('login', {server,user,password});
-    }
+  const handleSubmit = async () => {
+    $Error = '';
+    $Message = "Connecting...";
+    $UserStore.isConnecting = true;
+    //await sleep(1000);
+    dispatch('login', {server,user,password});
+  }
 
 </script>
 

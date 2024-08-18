@@ -30,8 +30,6 @@ extern crate objc;
 extern crate webkit2gtk;
 
 
-const WAIT_MS: u64 = 10;
-
 #[derive(Default)]
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
@@ -55,6 +53,7 @@ fn read_settings() -> Result<Settings, String> {
 fn write_settings(settings: Settings) -> Result<(), String> {
     settings::write_settings(settings)
 }
+
 #[tauri::command]
 async fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
     let mut _ssh = ssh::Ssh::new();
@@ -191,14 +190,14 @@ fn zoom_window(window: tauri::WebviewWindow, zoom: f64) {
 
 #[tauri::command]
 async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
-    println!("key: {key}");
+    //println!("key: {key}");
     let mutex = state.itx.lock().unwrap();
     mutex.as_ref().unwrap().send(key).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn resize(cols: u32, rows: u32, state: State<'_,AppState>) -> Result<(), String> {
-    println!("resize: {cols}x{rows}");
+    //println!("resize: {cols}x{rows}");
     let mut ssh = state.ssh.lock().unwrap();
     ssh.channel_shell_size(cols, rows)
 }
@@ -209,6 +208,9 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     let (itx, irx) = std::sync::mpsc::channel();
     //let (itx, irx) = flume::unbounded();
     *state.itx.lock().unwrap() = Some(itx);
+    let arcapp = Arc::new(app);
+    let arcappclone = Arc::clone(&arcapp);
+
 
     // create tty shell
     {
@@ -219,19 +221,21 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     // write
     {
         let ssh = state.ssh.lock().unwrap();    
-        let channel = ssh.channel.as_ref().unwrap();
-        let writer = Arc::clone(&channel);
+        let pty = ssh.pty.as_ref().unwrap();
+        let writer = Arc::clone(&pty);
 
         std::thread::spawn(move|| { 
             loop {
                 //println!("{:?}: waiting to recv command...", thread::current().id());
                 if let Ok(cmd) = irx.recv() {
                     //println!("command: {cmd}");
-                    let mut writer = writer.lock().unwrap();                    
+                    let mut writer = writer.lock().unwrap(); 
+
                     match writer.write(cmd.as_bytes()) {
                         Ok(0) => {
                             // Connection closed
-                            panic!("Connection closed by server.");                                
+                            println!("Connection closed by server.");
+                            arcapp.exit(1);                              
                         }
                         Ok(_n) => {
                             // Process the data
@@ -250,8 +254,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                     }
                 }
             }        
-        });      
-        
+        });         
     }
 
     // read 
@@ -260,36 +263,44 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let std_tcp;
         {
             let lock_ssh = state.ssh.lock().unwrap();  
-            let channel = lock_ssh.channel.as_ref().unwrap();  
-            reader = Arc::clone(channel);
+            let pty = lock_ssh.pty.as_ref().unwrap();  
+            reader = Arc::clone(pty);
             let tcp = lock_ssh.tcp.as_ref().unwrap();
             let lock_tcp = tcp.lock().unwrap();
             std_tcp = lock_tcp.try_clone().unwrap();
         }
         let mut buf = vec![0; 4096];
         
-
         std::thread::spawn(move|| {
             let mut poller = Poll::new().unwrap();
             let mut mio_tcp = TcpStream::from_std(std_tcp);
             poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
             let mut events = Events::with_capacity(1000);
-
-            loop {
-                println!("Polling...");
+            
+            'loop1: loop {
+                //println!("Polling...");
                 poller.poll(&mut events, None).unwrap();
                 //println!("Polling: data recieved");      
 
                 let mut reader = reader.lock().unwrap();   
 
                 if let Some(ev) = events.iter().next() {
-                    println!("EVENT: {:?}", ev);
+                    //println!("EVENT: {:?}", ev);
+                    if ev.is_read_closed() {
+                        println!("read closed, connection terminated.");
+                        arcappclone.exit(1);
+                        break 'loop1;
+                    }
+
                     if ev.token() == Token(0) {
                         loop {
                             match reader.read(&mut buf) {                                                      
                                 Ok(n) => { 
                                     if n == 0 {
-                                        panic!("read is ZERO");
+                                        println!("read is ZERO, exiting...");
+                                        reader.close().unwrap();
+                                        arcappclone.exit(1);
+                                        break 'loop1;
                                     }
                                     //println!("Stdout: {:?}", &buf[0..n]);
                                     // let data = match String::from_utf8(buf[..n].to_vec()) {
@@ -298,7 +309,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                     // };
                                     // println!("result ({n}):\n{}", data);  
                                     
-                                    app.emit("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap(); 
+                                    arcappclone.emit("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap(); 
 
                                     // let chunk_size = 1000;
                                     // let total_chunks = (buf.len() + chunk_size - 1) / chunk_size;
@@ -328,11 +339,12 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         // this must be done in windows
                         poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
                     }                    
-                };                                       
+                };                                
             }            
         });
     }
-    println!("Terminal started.");
+
+    println!("terminal started.");
 
     Ok(())
 

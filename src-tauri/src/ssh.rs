@@ -15,7 +15,7 @@ const WAIT_MS: u64 = 20;
 pub struct Ssh {
     pub session : Option<Session>,
     pub tcp: Option<Arc<Mutex<TcpStream>>>,    
-    pub channel : Option<Arc<Mutex<Channel>>>,
+    pub pty : Option<Arc<Mutex<Channel>>>,
     sftp : Option<Sftp>,
     host : String,
     user : String,
@@ -534,15 +534,16 @@ impl Ssh {
     pub fn channel_shell(&mut self) -> Result<(), String> {
         let session = self.session.as_ref().unwrap();
         session.set_blocking(true);
-        let mut channel = session.channel_session().unwrap();
-        channel.request_pty("xterm-256color", None, None).unwrap();
-        channel.shell().unwrap();
-        self.channel = Some(Arc::new(Mutex::new(channel)));
+        let mut pty = session.channel_session().unwrap();
+        pty.request_pty("xterm-256color", None, None).unwrap();
+        pty.shell().unwrap();
+        
+        self.pty = Some(Arc::new(Mutex::new(pty)));
         session.set_blocking(false);
         Ok(())
     }
     pub fn channel_shell_size(&mut self, cols: u32, rows: u32) -> Result<(), String> {
-        match self.channel.as_ref().unwrap().lock().unwrap().request_pty_size(cols, rows, None, None){
+        match self.pty.as_ref().unwrap().lock().unwrap().request_pty_size(cols, rows, None, None){
             Ok(_) => Ok(()),
             Err(e) => Err(format!("Error resizing terminal: {:?}", e.message()))
         }
