@@ -322,20 +322,21 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                                 
                                     // }
                                 
-                            },
-                            Err(e) => {
-                                if e.kind() == std::io::ErrorKind::WouldBlock {
-                                    println!("blocking reading, trying again");
-                                    tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
-                                    // TODO: 
-                                    // poll_for_new_data();
-                                } else {
-                                    panic!("Cannot read channel: {e}");   
-                                }
-                            },
+                                },
+                                Err(e) => {
+                                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                                        //println!("blocking reading, trying again");
+                                        break;
+                                        //tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
+                                        // TODO: 
+                                        // poll_for_new_data();
+                                    } else {
+                                        panic!("Cannot read channel: {e}");   
+                                    }
+                                },
+                            }
                         }
-                        //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
-                        // registry.reregister(connection, event.token(), Interest::READABLE)?                  
+                        // this must be done in windows
                         poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
                     }                    
                 };                                
