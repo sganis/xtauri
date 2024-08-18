@@ -65,6 +65,7 @@
 
         try {
             let r = await invoke('open_terminal');
+            term.focus();
             console.log(r);
         } catch (e) {
             console.log('error starting terminal: ', e);

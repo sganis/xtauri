@@ -13,7 +13,8 @@
       $: isConnected = $UserStore.isConnected && !$UserStore.isConnecting;
   
       let zoom = 1.0;
-  
+      let loginRef;
+
       // @ts-ignore
       const login = async (e) => {
           let args = e.detail
@@ -72,7 +73,9 @@
               //await getFiles("/");
               //push('/files');
           }
-          
+          else {
+            loginRef.focusPassword();
+          }          
           $UserStore.isConnecting=false;
       }
   
@@ -96,7 +99,7 @@
       {#if isConnected}
           <AppMain />
       {:else} 
-          <Login on:login={login} />
+          <Login on:login={login} bind:this={loginRef}/>
       {/if}
       <Footer />
   </div>

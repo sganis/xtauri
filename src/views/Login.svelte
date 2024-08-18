@@ -10,6 +10,9 @@
   let server = '192.168.100.202';
   let user = 'support';
   let password = '';
+
+  /** @type {HTMLInputElement} */
+  let passwordRef;
     
   onMount(async () => {
     try {
@@ -27,6 +30,11 @@
     $UserStore.isConnecting = true;
     //await sleep(1000);
     dispatch('login', {server,user,password});
+  }
+  export const focusPassword = () => {
+    setTimeout(() => {
+      passwordRef.focus();
+    }, 200);
   }
 
 </script>
@@ -55,6 +63,7 @@
           <input
             type="password"
             bind:value={password}
+            bind:this={passwordRef}
             disabled="{$UserStore.isConnecting || !$UserStore.needPassword}"
             id="password"
             placeholder="Password"            
