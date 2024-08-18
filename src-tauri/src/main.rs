@@ -279,12 +279,12 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                 //poller.wait(&mut events, None).unwrap();
                 poller.poll(&mut events, None).unwrap();
                 //println!("Polling: data recieved");              
-                
+                let mut reader = reader.lock().await;   
+                        
                 if let Some(ev) = events.iter().next() {
                     println!("EVENT: {:?}", ev);
                     if ev.token() == Token(0) {
 
-                        let mut reader = reader.lock().await;   
                                                  
                         match reader.read(&mut buf) {                                                      
                             Ok(n) => { 
@@ -304,7 +304,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                             Err(e) => {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
                                     println!("blocking reading, trying again");
-                                    tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
+                                    //tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
                                     // TODO: 
                                     // poll_for_new_data();
                                 } else {
