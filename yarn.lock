@@ -340,6 +340,13 @@
   dependencies:
     "@tauri-apps/api" "^2.0.0-rc.0"
 
+"@tauri-apps/plugin-window-state@^2.0.0-rc.0":
+  version "2.0.0-rc.0"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-window-state/-/plugin-window-state-2.0.0-rc.0.tgz#3852f2b313b5f7616dd863319d07ca8964e81e77"
+  integrity sha512-lR8reD+D1yIHT+53v56WltLS0+Y2zIkKqTuwrvz1yNbY5Hk4Z6foFV2Byo4kJAAvi5vbeGtvxYAjSiczZK5euw==
+  dependencies:
+    "@tauri-apps/api" "^2.0.0-rc.0"
+
 "@tsconfig/svelte@^5.0.4":
   version "5.0.4"
   resolved "https://registry.yarnpkg.com/@tsconfig/svelte/-/svelte-5.0.4.tgz#8bd0254472bd39a5e750f1b4a05ecb18c9f3bf80"

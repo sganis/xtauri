@@ -28,7 +28,9 @@
       {
         "title": "xtauri",
         "width": 1200,
-        "height": 700
+        "height": 700,
+        "minWidth": 500,
+        "minHeight": 500
       }
     ]
   }

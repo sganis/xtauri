@@ -1,22 +1,37 @@
 <script>
-  // @ts-nocheck
-      import Login from "./Login.svelte";
-      import { invoke } from "@tauri-apps/api/core"
+    // @ts-nocheck
+    import {onMount} from 'svelte'
+    import { getCurrentWindow } from '@tauri-apps/api/window'
+    import Login from "./Login.svelte";
+    import { invoke } from "@tauri-apps/api/core"
     //   import { downloadDir, appDataDir } from '@tauri-apps/api/path';
-      import {FileStore, PageStore, FileViewStore, FilePageStore,
-          UserStore, CurrentPath, FileRequested,JsonChanged,JsonData,JsonNewData,
-          Message, Error, Progress} from '../js/store'
-      import Header from "./layout/AppHeader.svelte";
-      import Footer from "./layout/AppFooter.svelte";
-      import AppMain from "./layout/AppMain.svelte";
-  
-      $: isConnected = $UserStore.isConnected && !$UserStore.isConnecting;
-  
-      let zoom = 1.0;
-      let loginRef;
+    import {FileStore, PageStore, FileViewStore, FilePageStore,
+        UserStore, CurrentPath, FileRequested,JsonChanged,JsonData,JsonNewData,
+        Message, Error, Progress} from '../js/store'
+    import Header from "./layout/AppHeader.svelte";
+    import Footer from "./layout/AppFooter.svelte";
+    import AppMain from "./layout/AppMain.svelte";
+    import { restoreStateCurrent, saveWindowState, StateFlags } 
+    from '@tauri-apps/plugin-window-state';
 
-      // @ts-ignore
-      const login = async (e) => {
+    $: isConnected = $UserStore.isConnected && !$UserStore.isConnecting;
+  
+    let zoom = 1.0;
+    let loginRef;
+    let window;
+    
+    onMount(async () => {
+        restoreStateCurrent(StateFlags.ALL);
+        window = getCurrentWindow();
+        window.listen('tauri://close-requested', ({events, payload}) => {
+            console.log('close requested', events, payload);
+            saveWindowState(StateFlags.ALL);
+            window.destroy()
+        })
+    });
+
+    // @ts-ignore
+    const login = async (e) => {
           let args = e.detail
           console.log(args)
           $Error = "";
@@ -77,9 +92,9 @@
             loginRef.focusPassword();
           }          
           $UserStore.isConnecting=false;
-      }
+    }
   
-      const keydown = async (e) => {
+    const keydown = async (e) => {
           if (e.key === '=' && e.ctrlKey) {
               zoom += 0.1;
           }
@@ -91,7 +106,7 @@
           }
           await invoke("zoom_window", {zoom});
           console.log(e)
-      }
+    }
   </script>
   
   <div class="d-flex flex-column vh-100 app">

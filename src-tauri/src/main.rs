@@ -363,7 +363,8 @@ async fn main() {
     tauri::async_runtime::set(tokio::runtime::Handle::current());
 
 
-    tauri::Builder::default()     
+    tauri::Builder::default()    
+        .plugin(tauri_plugin_window_state::Builder::default().build())         
         .setup(|app| {
             app.manage(AppState::default());
             Ok(())
