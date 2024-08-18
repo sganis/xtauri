@@ -10,10 +10,9 @@ mod command;
 
 use std::time;
 use std::io::{Read, Write};
-use std::sync::Arc;
-use tauri::{Manager, Window};
-use tauri::State;
-use tokio::sync::Mutex;
+use tauri::{Manager, Window, Emitter, State};
+// use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use mio::net::TcpStream;
 use mio::{Events, Interest, Poll, Token};
 //use polling::{Event, Events, Poller};
@@ -31,13 +30,11 @@ extern crate objc;
 extern crate webkit2gtk;
 
 
-const WAIT_MS: u64 = 10;
-
 #[derive(Default)]
 struct AppState {
     ssh: Mutex<ssh::Ssh>,
     connected: Mutex<bool>,
-    itx: Mutex<Option<tokio::sync::mpsc::Sender<String>>>,
+    itx: Mutex<Option<std::sync::mpsc::Sender<String>>>,
 }
 
 // the payload type must implement `Serialize` and `Clone`.
@@ -56,6 +53,7 @@ fn read_settings() -> Result<Settings, String> {
 fn write_settings(settings: Settings) -> Result<(), String> {
     settings::write_settings(settings)
 }
+
 #[tauri::command]
 async fn connect_with_password(settings: Settings, state: State<'_,AppState>) -> Result<(), String> {
     let mut _ssh = ssh::Ssh::new();
@@ -69,9 +67,9 @@ async fn connect_with_password(settings: Settings, state: State<'_,AppState>) ->
         },
         Ok(_) => {
             write_settings(settings).expect("Cannot write settings");
-            let mut ssh = state.ssh.lock().await;
+            let mut ssh = state.ssh.lock().unwrap();
             *ssh = _ssh;
-            *state.connected.lock().await = true;
+            *state.connected.lock().unwrap() = true;
             println!("Connected");
             let output = ssh.run("whoami").unwrap();
             println!("{}", output);
@@ -100,9 +98,9 @@ async fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Resu
         },        
         Ok(_) => {
             write_settings(settings).expect("Cannot write settings");
-            let mut ssh = state.ssh.lock().await;
+            let mut ssh = state.ssh.lock().unwrap();
             *ssh = _ssh;
-            *state.connected.lock().await = true;
+            *state.connected.lock().unwrap() = true;
             println!("Connected");
             let output = ssh.run("whoami").unwrap();
             println!("{}", output);
@@ -113,7 +111,7 @@ async fn connect_with_key(settings: Settings, state: State<'_,AppState>) -> Resu
 
 #[tauri::command]
 async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    let mut ssh = state.ssh.lock().await;
+    let mut ssh = state.ssh.lock().unwrap();
     ssh.disconnect()   
 }
 
@@ -128,7 +126,7 @@ async fn setup_ssh(settings: Settings) -> Result<(), String> {
 
 #[tauri::command]
 async fn ssh_run(command: String, state: State<'_,AppState>) -> Result<String, String> {
-    let mut ssh = state.ssh.lock().await;
+    let mut ssh = state.ssh.lock().unwrap();
     ssh.run(&command)
 }
 
@@ -138,7 +136,7 @@ async fn download(
     localpath: String,
     window: Window, 
     state: State<'_, AppState>) -> Result<String, String> {
-    let mut ssh = state.ssh.lock().await;
+    let mut ssh = state.ssh.lock().unwrap();
     match ssh.scp_download(&remotepath, &localpath, window) {
         Err(e) => Err(e),
         Ok(o) => {
@@ -154,7 +152,7 @@ async fn upload(
     remotepath: String, 
     window: Window,
     state: State<'_,AppState>) -> Result<String, String> {
-    let mut ssh = state.ssh.lock().await;
+    let mut ssh = state.ssh.lock().unwrap();
     match ssh.scp_upload(&localpath, &remotepath, window) {
         Err(e) => Err(e),
         Ok(o) => {
@@ -165,7 +163,7 @@ async fn upload(
 }
 
 #[tauri::command]
-fn zoom_window(window: tauri::Window, zoom: f64) {
+fn zoom_window(window: tauri::WebviewWindow, zoom: f64) {
     //println!("zoom window: {zoom}");
 
     let _ = window.with_webview(move |webview| {
@@ -192,40 +190,52 @@ fn zoom_window(window: tauri::Window, zoom: f64) {
 
 #[tauri::command]
 async fn send_key(key: String, state: State<'_,AppState>) -> Result<(), String> {
-    println!("key: {key}");
-    let mutex = state.itx.lock().await;
-    mutex.as_ref().unwrap().send(key).await.map_err(|e| e.to_string())
+    //println!("key: {key}");
+    let mutex = state.itx.lock().unwrap();
+    mutex.as_ref().unwrap().send(key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn resize(cols: u32, rows: u32, state: State<'_,AppState>) -> Result<(), String> {
+    //println!("resize: {cols}x{rows}");
+    let mut ssh = state.ssh.lock().unwrap();
+    ssh.channel_shell_size(cols, rows)
 }
 
 #[tauri::command]
 async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Result<(), String> {
     
-    let (itx, mut irx) = tokio::sync::mpsc::channel(100);
+    let (itx, irx) = std::sync::mpsc::channel();
     //let (itx, irx) = flume::unbounded();
-    *state.itx.lock().await = Some(itx);
+    *state.itx.lock().unwrap() = Some(itx);
+    let arcapp = Arc::new(app);
+    let arcappclone = Arc::clone(&arcapp);
+
 
     // create tty shell
     {
-        let mut ssh = state.ssh.lock().await;
+        let mut ssh = state.ssh.lock().unwrap();
         ssh.channel_shell().unwrap();
     }
 
     // write
     {
-        let ssh = state.ssh.lock().await;    
-        let channel = ssh.channel.as_ref().unwrap();
-        let writer = Arc::clone(&channel);
+        let ssh = state.ssh.lock().unwrap();    
+        let pty = ssh.pty.as_ref().unwrap();
+        let writer = Arc::clone(&pty);
 
-        tokio::spawn(async move { 
+        std::thread::spawn(move|| { 
             loop {
                 //println!("{:?}: waiting to recv command...", thread::current().id());
-                if let Some(cmd) = irx.recv().await {
-                    println!("command: {cmd}");
-                    let mut writer = writer.lock().await;                    
+                if let Ok(cmd) = irx.recv() {
+                    //println!("command: {cmd}");
+                    let mut writer = writer.lock().unwrap(); 
+
                     match writer.write(cmd.as_bytes()) {
                         Ok(0) => {
                             // Connection closed
-                            panic!("Connection closed by server.");                                
+                            println!("Connection closed by server.");
+                            arcapp.exit(1);                              
                         }
                         Ok(_n) => {
                             // Process the data
@@ -234,8 +244,8 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         }
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                println!("Channel write error: {}", e);
-                                tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;         
+                                println!("Write WouldBlock: {}", e);
+                                //std::thread::sleep(time::Duration::from_millis(WAIT_MS));         
                                 //continue;
                             } else {
                                 panic!("Error reading from channel: {:?}", e);                                
@@ -244,8 +254,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                     }
                 }
             }        
-        });      
-        
+        });         
     }
 
     // read 
@@ -253,58 +262,71 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
         let reader;
         let std_tcp;
         {
-            let lock_ssh = state.ssh.lock().await;  
-            let channel = lock_ssh.channel.as_ref().unwrap();  
-            reader = Arc::clone(channel);
+            let lock_ssh = state.ssh.lock().unwrap();  
+            let pty = lock_ssh.pty.as_ref().unwrap();  
+            reader = Arc::clone(pty);
             let tcp = lock_ssh.tcp.as_ref().unwrap();
-            let lock_tcp = tcp.lock().await;
+            let lock_tcp = tcp.lock().unwrap();
             std_tcp = lock_tcp.try_clone().unwrap();
         }
         let mut buf = vec![0; 4096];
         
-
-        tokio::spawn(async move {
+        std::thread::spawn(move|| {
             let mut poller = Poll::new().unwrap();
             let mut mio_tcp = TcpStream::from_std(std_tcp);
             poller.registry().register(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
-            let mut events = Events::with_capacity(128);
+            let mut events = Events::with_capacity(1000);
             
-            // let poller = Poller::new().unwrap();
-            // unsafe {poller.add(&std_tcp, Event::readable(1)).unwrap()};
-            // let mut events = Events::new();    
-
-            loop {
-                println!("Polling...");
-                //events.clear();
-                //poller.wait(&mut events, None).unwrap();
+            'loop1: loop {
+                //println!("Polling...");
                 poller.poll(&mut events, None).unwrap();
-                //println!("Polling: data recieved");              
-                let mut reader = reader.lock().await;   
-                        
-                if let Some(ev) = events.iter().next() {
-                    println!("EVENT: {:?}", ev);
-                    if ev.token() == Token(0) {
+                //println!("Polling: data recieved");      
 
-                                                 
-                        match reader.read(&mut buf) {                                                      
-                            Ok(n) => { 
-                                if n == 0 {
-                                    panic!("read is ZERO");
-                                }
-                                //println!("Stdout: {:?}", &buf[0..n]);
-                                // let data = match String::from_utf8(buf[..n].to_vec()) {
-                                //     Ok(o) => o,
-                                //     Err(e) => panic!("invalid utf-8 sequence: {}", e)
-                                // };
-                                //println!("result ({n}):\n{}", result.clone());  
-                                app.emit_all("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap();                                 
-                                //app.emit_all("terminal-output", Payload {data}).unwrap();                                 
+                let mut reader = reader.lock().unwrap();   
+
+                if let Some(ev) = events.iter().next() {
+                    //println!("EVENT: {:?}", ev);
+                    if ev.is_read_closed() {
+                        println!("read closed, connection terminated.");
+                        arcappclone.exit(1);
+                        break 'loop1;
+                    }
+
+                    if ev.token() == Token(0) {
+                        loop {
+                            match reader.read(&mut buf) {                                                      
+                                Ok(n) => { 
+                                    if n == 0 {
+                                        println!("read is ZERO, exiting...");
+                                        reader.close().unwrap();
+                                        arcappclone.exit(1);
+                                        break 'loop1;
+                                    }
+                                    //println!("Stdout: {:?}", &buf[0..n]);
+                                    // let data = match String::from_utf8(buf[..n].to_vec()) {
+                                    //      Ok(o) => o,
+                                    //      Err(e) => panic!("invalid utf-8 sequence: {}", e)
+                                    // };
+                                    // println!("result ({n}):\n{}", data);  
+                                    
+                                    arcappclone.emit("terminal-output", Payload {data: buf[..n].to_vec()}).unwrap(); 
+
+                                    // let chunk_size = 1000;
+                                    // let total_chunks = (buf.len() + chunk_size - 1) / chunk_size;
+
+                                    // for i in 0..total_chunks {
+                                    //     let start = i * chunk_size;
+                                    //     let end = std::cmp::min(start + chunk_size, buf.len());  
+                                    //     println!("chunk {} {} {}", i, start, end);                                                 
+                                    //     app.emit("terminal-output", Payload {data: buf[start..end].to_vec()}).unwrap();                                                                 
+                                
+                                    // }
                                 
                             },
                             Err(e) => {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
                                     println!("blocking reading, trying again");
-                                    //tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
+                                    tokio::time::sleep(time::Duration::from_millis(WAIT_MS)).await;
                                     // TODO: 
                                     // poll_for_new_data();
                                 } else {
@@ -315,12 +337,13 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         //poller.modify(&std_tcp, Event::readable(1)).unwrap();  
                         // registry.reregister(connection, event.token(), Interest::READABLE)?                  
                         poller.registry().reregister(&mut mio_tcp, Token(0), Interest::READABLE).unwrap();
-            
                     }                    
-                };                                           
+                };                                
             }            
         });
     }
+
+    println!("terminal started.");
 
     Ok(())
 
@@ -348,7 +371,7 @@ async fn main() {
             read_settings, write_settings,
             connect_with_key, connect_with_password, 
             ssh_run, download, upload, setup_ssh, disconnect,
-            open_terminal, send_key,
+            open_terminal, send_key, resize,
             zoom_window,    
         ])
         .run(tauri::generate_context!())

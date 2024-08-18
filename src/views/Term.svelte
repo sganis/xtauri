@@ -1,30 +1,24 @@
 <script>
 // @ts-nocheck
-
     import "@xterm/xterm/css/xterm.css";
     import { Terminal }  from '@xterm/xterm';
     import { FitAddon } from "@xterm/addon-fit";
-    import { invoke } from "@tauri-apps/api/tauri";
-    import { appWindow } from '@tauri-apps/api/window'
-    // import { emit, listen } from '@tauri-apps/api/event';
+    import { invoke } from "@tauri-apps/api/core";
+    import { getCurrentWindow } from '@tauri-apps/api/window'
     import {createEventDispatcher, onMount} from 'svelte';
     const dispatch = createEventDispatcher();
-
-    
-    
     let termEl;
     let term;
 
     onMount(async () => {
         //console.log('term mounted');
-
-       
-        
         term = new Terminal({ 
             cursorBlink: true, 
             convertEol: true,            
             fontFamily: "monospace",
             fontSize: 20,
+            cols: 120,
+            rows: 40,
         });
 
         term.write('Connecting... \n\n');
@@ -36,6 +30,7 @@
         fit.fit();
 
         term.onData(async (data) => {
+            //console.log('onData:', data);
             await invoke("send_key", {key: data});
         });
 
@@ -48,23 +43,33 @@
         term.onSelectionChange(() => {
             //console.log('onSelectionChange');
         });
-        term.onResize(e => {
-            //console.log('onResize', e);
-            // websocket.send({ rows: evt.rows });
+        term.onResize(async (e) => {
+            //console.log('onResize', e.colos, e.rows);
+            await invoke("resize", {cols: e.cols, rows: e.rows});
         });
         term.onRender (() => {
             //console.log('rendering');
-            //fit.fit();
+            fit.fit();
         });
 
-        appWindow.listen("terminal-output", ({payload}) => {
+        let window = getCurrentWindow();
+        
+        window.listen("terminal-output", ({payload}) => {
             term.write(payload.data);
         });
-        appWindow.onResized(({ payload: size }) => {
+
+        window.onResized(({ payload: size }) => {
+            //console.log('windows resized:', size);
             fit.fit();
         })
 
-        await invoke('open_terminal');
+        try {
+            let r = await invoke('open_terminal');
+            term.focus();
+            console.log(r);
+        } catch (e) {
+            console.log('error starting terminal: ', e);
+        }
 
     });
 
@@ -77,12 +82,13 @@
 
 <style>
 .term-container {
-    /* height: calc(100vh - 144px); */
+    height: calc(100vh - 144px);
     /* box-sizing: border-box;   */
     background-color: #101010;
     margin: 0;
     padding: 10px 10px 2px 10px;  
     /* padding-bottom: 0px; */
+    /* border: 1px solid red; */
 }
 .terminal {
     width: 100%;

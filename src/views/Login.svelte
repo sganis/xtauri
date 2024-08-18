@@ -1,5 +1,5 @@
 <script>
-  import { invoke } from "@tauri-apps/api/tauri"
+  import { invoke } from "@tauri-apps/api/core"
   import {createEventDispatcher, onMount} from 'svelte'
   import {UserStore, Message, Error} from '../js/store'
   import Spinner from '../lib/Spinner.svelte'
@@ -10,6 +10,9 @@
   let server = '192.168.100.202';
   let user = 'support';
   let password = '';
+
+  /** @type {HTMLInputElement} */
+  let passwordRef;
     
   onMount(async () => {
     try {
@@ -21,13 +24,18 @@
     }
 	});
 
-    const handleSubmit = async () => {
-      $Error = '';
-      $Message = "Connecting...";
-      $UserStore.isConnecting = true;
-      //await sleep(1000);
-      dispatch('login', {server,user,password});
-    }
+  const handleSubmit = async () => {
+    $Error = '';
+    $Message = "Connecting...";
+    $UserStore.isConnecting = true;
+    //await sleep(1000);
+    dispatch('login', {server,user,password});
+  }
+  export const focusPassword = () => {
+    setTimeout(() => {
+      passwordRef.focus();
+    }, 200);
+  }
 
 </script>
 
@@ -55,6 +63,7 @@
           <input
             type="password"
             bind:value={password}
+            bind:this={passwordRef}
             disabled="{$UserStore.isConnecting || !$UserStore.needPassword}"
             id="password"
             placeholder="Password"            

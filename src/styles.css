@@ -52,6 +52,13 @@ input {
   transition: border-color 0.25s;
   outline: none;
 }
+input:disabled {
+  background-color: #242424;
+  color: gray;
+}
+input:disabled::placeholder {
+  color: #3c3c3c;
+}
 .btn {
   white-space: nowrap;
 }

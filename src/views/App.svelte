@@ -1,8 +1,8 @@
 <script>
   // @ts-nocheck
       import Login from "./Login.svelte";
-      import { invoke } from "@tauri-apps/api/tauri"
-      import { downloadDir, appDataDir } from '@tauri-apps/api/path';
+      import { invoke } from "@tauri-apps/api/core"
+    //   import { downloadDir, appDataDir } from '@tauri-apps/api/path';
       import {FileStore, PageStore, FileViewStore, FilePageStore,
           UserStore, CurrentPath, FileRequested,JsonChanged,JsonData,JsonNewData,
           Message, Error, Progress} from '../js/store'
@@ -13,22 +13,8 @@
       $: isConnected = $UserStore.isConnected && !$UserStore.isConnecting;
   
       let zoom = 1.0;
-  
-      // close splash
-      // tauri.conf.js
-      // {
-      //     "width": 600,
-      //     "height": 400,
-      //     "center": true,
-      //     "decorations": false,
-      //     "url": "splash.html",
-      //     "theme": "Dark",
-      //     "label": "splash"
-      //   }
-      //document.addEventListener('DOMContentLoaded', () => {
-      //   invoke('close_splash')
-      //})
-  
+      let loginRef;
+
       // @ts-ignore
       const login = async (e) => {
           let args = e.detail
@@ -87,7 +73,9 @@
               //await getFiles("/");
               //push('/files');
           }
-          
+          else {
+            loginRef.focusPassword();
+          }          
           $UserStore.isConnecting=false;
       }
   
@@ -111,7 +99,7 @@
       {#if isConnected}
           <AppMain />
       {:else} 
-          <Login on:login={login} />
+          <Login on:login={login} bind:this={loginRef}/>
       {/if}
       <Footer />
   </div>

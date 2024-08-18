@@ -5,8 +5,7 @@ use std::time::Duration;
 use ssh2::{Channel, FileStat, Session, Sftp};
 use std::path::{PathBuf, Path};
 use std::{thread, time};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc,Mutex};
 
 use super::command;
 
@@ -16,7 +15,7 @@ const WAIT_MS: u64 = 20;
 pub struct Ssh {
     pub session : Option<Session>,
     pub tcp: Option<Arc<Mutex<TcpStream>>>,    
-    pub channel : Option<Arc<Mutex<Channel>>>,
+    pub pty : Option<Arc<Mutex<Channel>>>,
     sftp : Option<Sftp>,
     host : String,
     user : String,
@@ -186,7 +185,7 @@ impl Ssh {
         let arc_tcp = Arc::new(Mutex::new(tcp));
         let tcp_clone;
         {
-            let locked_tcp = arc_tcp.lock().await;
+            let locked_tcp = arc_tcp.lock().unwrap();
             tcp_clone = locked_tcp.try_clone().unwrap();
         }  
         
@@ -227,7 +226,7 @@ impl Ssh {
         let arc_tcp = Arc::new(Mutex::new(tcp));
         let tcp_clone;
         {
-            let locked_tcp = arc_tcp.lock().await;
+            let locked_tcp = arc_tcp.lock().unwrap();
             tcp_clone = locked_tcp.try_clone().unwrap();
         }  
         
@@ -335,7 +334,7 @@ impl Ssh {
         println!("stdout: {output}");
         Ok(output)
     }
-    pub fn scp_download(&mut self, remotepath: &str, localpath: &str, window: tauri::Window) -> Result<String, String> {
+    pub fn scp_download(&mut self, remotepath: &str, localpath: &str, _window: tauri::Window) -> Result<String, String> {
         println!("downloading: {remotepath}");
         let (mut channel, stat) = match self.session.as_ref().unwrap()
             .scp_recv(Path::new(remotepath)) {
@@ -366,18 +365,18 @@ impl Ssh {
                     // report progress
                     let percent = ((count as f64/size as f64) * 100.)  as i32;
                     if prev_percent != percent {
-                        let p = percent as f32 / 100.;
-                        window.emit("PROGRESS", Payload { percent: p }).unwrap();
+                        let _p = percent as f32 / 100.;
+                        //window.emit("PROGRESS", Payload { percent: p }).unwrap();
                         prev_percent = percent;
                     }
                 }
             }
         }
         println!("written: {count}");
-        window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
+        //window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
         Ok("done".to_string())
     }
-    pub fn scp_upload(&mut self, localpath: &str, remotepath: &str, window: tauri::Window) -> Result<String, String> {
+    pub fn scp_upload(&mut self, localpath: &str, remotepath: &str, _window: tauri::Window) -> Result<String, String> {
         println!("uploading: {localpath} to {remotepath}");
         let size = std::fs::metadata(localpath).unwrap().len();
         let mut channel = match self.session.as_ref().unwrap()
@@ -408,14 +407,14 @@ impl Ssh {
             // report progress
             let percent = ((count as f64/size as f64) * 100.)  as i32;
             if prev_percent != percent {
-                let p = percent as f32 / 100.;
-                window.emit("PROGRESS", Payload { percent: p }).unwrap();
+                let _p = percent as f32 / 100.;
+                //window.emit("PROGRESS", Payload { percent: p }).unwrap();
                 prev_percent = percent;
             }
         }
         
         println!("written: {count}");
-        window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
+        //window.emit("PROGRESS", Payload { percent: 0. }).unwrap();                        
         Ok("done".to_string())
     }
     pub fn sftp_stat(&mut self, filename: &str) -> Result<FileStat, String> {
@@ -535,12 +534,19 @@ impl Ssh {
     pub fn channel_shell(&mut self) -> Result<(), String> {
         let session = self.session.as_ref().unwrap();
         session.set_blocking(true);
-        let mut channel = session.channel_session().unwrap();
-        channel.request_pty("xterm-256color", None, None).unwrap();
-        channel.shell().unwrap();
-        self.channel = Some(Arc::new(Mutex::new(channel)));
+        let mut pty = session.channel_session().unwrap();
+        pty.request_pty("xterm-256color", None, None).unwrap();
+        pty.shell().unwrap();
+        
+        self.pty = Some(Arc::new(Mutex::new(pty)));
         session.set_blocking(false);
         Ok(())
+    }
+    pub fn channel_shell_size(&mut self, cols: u32, rows: u32) -> Result<(), String> {
+        match self.pty.as_ref().unwrap().lock().unwrap().request_pty_size(cols, rows, None, None){
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Error resizing terminal: {:?}", e.message()))
+        }
     }
 }
 
