@@ -535,6 +535,10 @@ impl Ssh {
         let session = self.session.as_ref().unwrap();
         session.set_blocking(true);
         let mut pty = session.channel_session().unwrap();
+        
+        // setenv not working
+        //p ty.setenv("FOO","VAR").unwrap();
+        
         pty.request_pty("xterm-256color", None, None).unwrap();
         pty.shell().unwrap();
         

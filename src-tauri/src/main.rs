@@ -18,6 +18,7 @@ use mio::{Events, Interest, Poll, Token};
 //use polling::{Event, Events, Poller};
 use settings::Settings;
 
+const WAIT_MS: u64 = 50;
 
 // use serde::{Deserialize, Serialize};
 // use chrono::prelude::{DateTime, NaiveDateTime, Utc};
@@ -210,7 +211,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     *state.itx.lock().unwrap() = Some(itx);
     let arcapp = Arc::new(app);
     let arcappclone = Arc::clone(&arcapp);
-
+    let mut buf = vec![0; 4096];
 
     // create tty shell
     {
@@ -222,6 +223,29 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
     {
         let ssh = state.ssh.lock().unwrap();    
         let pty = ssh.pty.as_ref().unwrap();
+
+        // env vars
+        // let mut p = pty.lock().unwrap();
+        // p.write(b"export FOO=VAR\n").unwrap();
+        // loop {
+        //     match p.read(&mut buf) {
+        //         Err(e) => {
+        //             if e.kind() == std::io::ErrorKind::WouldBlock {
+        //                 println!("read WouldBlock: {}", e);  
+        //                 std::thread::sleep(time::Duration::from_millis(WAIT_MS));                                                               
+        //             } else {
+        //                 panic!("Error reading from channel: {:?}", e);                                
+        //             }
+        //         },
+        //         Ok(n) => {
+        //             if n == 0 {
+        //                 panic!("cannot set env var, exiting.");
+        //             }   
+        //             break
+        //         }                
+        //     }
+        // }
+        
         let writer = Arc::clone(&pty);
 
         std::thread::spawn(move|| { 
@@ -245,7 +269,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 println!("Write WouldBlock: {}", e);
-                                //std::thread::sleep(time::Duration::from_millis(WAIT_MS));         
+                                std::thread::sleep(time::Duration::from_millis(WAIT_MS));         
                                 //continue;
                             } else {
                                 panic!("Error reading from channel: {:?}", e);                                
@@ -269,7 +293,7 @@ async fn open_terminal(state: State<'_,AppState>, app: tauri::AppHandle) -> Resu
             let lock_tcp = tcp.lock().unwrap();
             std_tcp = lock_tcp.try_clone().unwrap();
         }
-        let mut buf = vec![0; 4096];
+        
         
         std::thread::spawn(move|| {
             let mut poller = Poll::new().unwrap();
