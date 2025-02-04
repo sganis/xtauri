@@ -12,8 +12,9 @@
     import Footer from "./AppFooter.svelte";
     import AppMain from './AppMain.svelte';
     import { restoreStateCurrent, saveWindowState, StateFlags } 
-    from '@tauri-apps/plugin-window-state';
-
+        from '@tauri-apps/plugin-window-state';
+    import { getCurrentWebview } from '@tauri-apps/api/webview';
+    
     $: isConnected = $UserStore.isConnected && !$UserStore.isConnecting;
   
     let zoom = 1.0;
@@ -95,18 +96,22 @@
     }
   
     const keydown = async (e) => {
-          if (e.key === '=' && e.ctrlKey) {
-              zoom += 0.1;
-          }
-          else if (e.key === '-' && e.ctrlKey) {
-              zoom -= 0.1;
-          }
-          else if (e.key === '0' && e.ctrlKey) {
-              zoom = 1.0;
-          }
-          await invoke("zoom_window", {zoom});
-          console.log(e)
+        console.log(e);
+        if (e.key === '=' && e.ctrlKey) {
+            zoom += 0.1;
+            await getCurrentWebview().setZoom(zoom);
+        }
+        else if (e.key === '-' && e.ctrlKey) {
+            zoom -= 0.1;
+            await getCurrentWebview().setZoom(zoom);
+        }
+        else if (e.key === '0' && e.ctrlKey) {
+            zoom = 1.0;
+            await getCurrentWebview().setZoom(zoom);
+        }
+        // await invoke("zoom_window", {zoom})
     }
+
   </script>
   
   <div class="d-flex flex-column vh-100 app">

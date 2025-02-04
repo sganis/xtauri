@@ -17,10 +17,10 @@ pub fn run(cmd: &str) -> (String, String, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-      
+
     #[test]
     fn run_command() {
-        let (o,e,r) = run("echo hello");
+        let (o, e, r) = run("echo hello");
         assert_eq!(o, "hello");
         assert_eq!(e, "");
         assert_eq!(r, 0);
@@ -28,12 +28,12 @@ mod tests {
     #[test]
     fn run_stderr() {
         if cfg!(windows) {
-            let (_,e,r) = run("dir c:\\nofile");
+            let (_, e, r) = run("dir c:\\nofile");
             println!("{e}");
             assert!(e.contains("Not Found"));
             assert_eq!(r, 1);
         } else {
-            let (_,e,_) = run("ls nofile");
+            let (_, e, _) = run("ls nofile");
             println!("{e}");
             assert!(e.contains("No such file"));
             //assert_eq!(r, 2);
@@ -41,34 +41,31 @@ mod tests {
     }
     #[test]
     fn run_status() {
-        let (o,e,r) = run("exit 1");
+        let (o, e, r) = run("exit 1");
         assert_eq!(o, "");
         assert_eq!(e, "");
         assert_eq!(r, 1);
     }
-    
+
     #[test]
     fn run_cancel_stdout() {
-        let (o,e,r) = run("echo hello >nul");
+        let (o, e, r) = run("echo hello >nul");
         assert_eq!(o, "");
         assert_eq!(e, "");
         assert_eq!(r, 0);
-
     }
     #[test]
     fn run_cancel_stderr() {
         if cfg!(windows) {
-            let (o,e,r) = run("dir c:\\nofile 2>&1");
+            let (o, e, r) = run("dir c:\\nofile 2>&1");
             assert!(o.contains("Not Found"));
             assert_eq!(e, "");
             assert_eq!(r, 1);
         } else {
-            let (o,e,_) = run("ls nofile 2>&1");
+            let (o, e, _) = run("ls nofile 2>&1");
             assert!(o.contains("No such file"));
             assert_eq!(e, "");
             //assert_eq!(r, 2);
         }
     }
-    
 }
-
