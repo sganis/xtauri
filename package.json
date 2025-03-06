@@ -10,11 +10,14 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri"
   },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/cli": "^2",
+    "@tauri-apps/plugin-shell": "^2"
+  },
   "devDependencies": {
-    "@tauri-apps/plugin-shell": "^2.0.0-rc.0",
     "@popperjs/core": "2.11.8",
     "@sveltejs/vite-plugin-svelte": "^3.1.1",
-    "@tauri-apps/cli": "^2.0.0-rc.3",
     "@tsconfig/svelte": "^5.0.4",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
