@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub server: String,
     pub user: String,
-    pub port: i16,
+    pub port: u16,
     pub home_dir: String,
 
     #[serde(skip_serializing)]

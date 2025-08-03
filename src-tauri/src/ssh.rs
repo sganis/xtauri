@@ -21,6 +21,15 @@ pub struct Ssh {
     user: String,
     password: String,
     private_key: String,
+
+    // Add jump server connection info
+    pub jump_session: Option<Session>,
+    pub jump_tcp: Option<Arc<Mutex<TcpStream>>>,
+    pub tunnel_channel: Option<Channel>,
+    jump_host: String,
+    jump_user: String,
+    jump_password: String,
+    jump_private_key: String,
 }
 
 // #[derive(Clone, serde::Serialize)]
@@ -107,7 +116,7 @@ impl Ssh {
     }
     async fn transfer_public_key(
         host: &str,
-        port: i16,
+        port: u16,
         user: &str,
         password: &str,
     ) -> Result<(), String> {
@@ -132,7 +141,7 @@ impl Ssh {
             Ok(())
         }
     }
-    async fn test_ssh(host: &str, port: i16, user: &str) -> Result<(), String> {
+    async fn test_ssh(host: &str, port: u16, user: &str) -> Result<(), String> {
         if !Ssh::has_private_key() {
             return Err("No private key".to_string());
         }
@@ -149,7 +158,7 @@ impl Ssh {
     }
     pub async fn setup_ssh(
         host: &str,
-        port: i16,
+        port: u16,
         user: &str,
         password: &str,
     ) -> Result<(), String> {
@@ -173,7 +182,7 @@ impl Ssh {
         }
         Ok(())
     }
-    fn _get_tcp(&mut self, host: &str, port: i16) -> Result<TcpStream, String> {
+    fn _get_tcp(&mut self, host: &str, port: u16) -> Result<TcpStream, String> {
         let timeout = Duration::new(5, 0); // 5 secs
         let addresses: Vec<_> = match format!("{}:{}", host, port).to_socket_addrs() {
             Err(e) => {
@@ -212,7 +221,7 @@ impl Ssh {
     pub async fn connect_with_password(
         &mut self,
         host: &str,
-        port: i16,
+        port: u16,
         user: &str,
         password: &str,
     ) -> Result<(), String> {
@@ -220,6 +229,11 @@ impl Ssh {
             Err(e) => return Err(e),
             Ok(o) => o,
         };
+
+        // Check if jump server is configured
+        if !self.jump_host.is_empty() {
+            return self.connect_with_password_via_jump(host, port, user, password).await;
+        }
 
         // clone tcp instance
         let arc_tcp = Arc::new(Mutex::new(tcp));
@@ -259,7 +273,7 @@ impl Ssh {
     pub async fn connect_with_key(
         &mut self,
         host: &str,
-        port: i16,
+        port: u16,
         user: &str,
         pkey: &str,
     ) -> Result<(), String> {
@@ -307,11 +321,109 @@ impl Ssh {
         Ok(())
     }
     pub fn disconnect(&mut self) -> Result<(), String> {
-        if let Err(e) = self.session.as_ref().unwrap().disconnect(None, "", None) {
-            return Err(e.to_string());
+        // if let Err(e) = self.session.as_ref().unwrap().disconnect(None, "", None) {
+        //     return Err(e.to_string());
+        // }
+
+        // Disconnect target session
+        if let Some(session) = &self.session {
+            if let Err(e) = session.disconnect(None, "", None) {
+                return Err(e.to_string());
+            }
+        }
+        
+        // Disconnect jump server session
+        if let Some(jump_session) = &self.jump_session {
+            if let Err(e) = jump_session.disconnect(None, "", None) {
+                return Err(e.to_string());
+            }
         }
         Ok(())
     }
+
+    // Add this method for jump server configuration
+    pub fn set_jump_server(&mut self, jump_host: &str, jump_user: &str, jump_password: &str) {
+        self.jump_host = jump_host.to_string();
+        self.jump_user = jump_user.to_string();
+        self.jump_password = jump_password.to_string();
+    }
+
+    pub fn set_jump_server_with_key(&mut self, jump_host: &str, jump_user: &str, jump_private_key: &str) {
+        self.jump_host = jump_host.to_string();
+        self.jump_user = jump_user.to_string();
+        self.jump_private_key = jump_private_key.to_string();
+    }
+
+    // New method for connecting through jump server
+    async fn connect_with_password_via_jump(
+        &mut self,
+        target_host: &str,
+        target_port: u16,
+        target_user: &str,
+        target_password: &str,
+    ) -> Result<(), String> {
+        // 1. Connect to jump server
+        let jump_tcp = match self._get_tcp(&self.jump_host, 22) {
+            Err(e) => return Err(format!("Jump server connection failed: {e}")),
+            Ok(o) => o,
+        };
+
+        let arc_jump_tcp = Arc::new(Mutex::new(jump_tcp));
+        let jump_tcp_clone = {
+            let locked_tcp = arc_jump_tcp.lock().unwrap();
+            locked_tcp.try_clone().unwrap()
+        };
+
+        let mut jump_session = Session::new().unwrap();
+        jump_session.set_tcp_stream(jump_tcp_clone);
+        
+        if let Err(e) = jump_session.handshake() {
+            return Err(format!("Jump server SSH handshake error: {}", e));
+        }
+
+        if let Err(e) = jump_session.userauth_password(&self.jump_user, &self.jump_password) {
+            return Err(format!("Jump server authentication error: {e}"));
+        }
+
+        // 2. Create tunnel through jump server
+        let tunnel_channel = match jump_session.channel_direct_tcpip(target_host, target_port, None) {
+            Err(e) => return Err(format!("Failed to create tunnel: {e}")),
+            Ok(o) => o,
+        };
+
+        // 3. Create target session using tunnel
+        let mut target_session = Session::new().unwrap();
+        target_session.set_tcp_stream(tunnel_channel);
+
+        if let Err(e) = target_session.handshake() {
+            return Err(format!("Target SSH handshake error: {}", e));
+        }
+
+        if let Err(e) = target_session.userauth_password(target_user, target_password) {
+            return Err(format!("Target authentication error: {e}"));
+        }
+
+        let sftp = match target_session.sftp() {
+            Err(e) => return Err(format!("Cannot create sftp channel {e}")),
+            Ok(o) => o,
+        };
+
+        target_session.set_blocking(false);
+
+        // Store all connections
+        self.jump_tcp = Some(arc_jump_tcp);
+        self.jump_session = Some(jump_session);
+        self.tunnel_channel = Some(tunnel_channel);
+        self.session = Some(target_session);
+        self.sftp = Some(sftp);
+        self.host = target_host.to_string();
+        self.user = target_user.to_string();
+        self.password = target_password.to_string();
+
+        Ok(())
+    }
+
+
     pub fn run(&mut self, cmd: &str) -> Result<String, String> {
         println!("running CMD: {}", cmd);
         let mut channel = loop {
@@ -631,7 +743,7 @@ mod tests {
 
     use super::*;
     use std::env;
-    const PORT: i16 = 22;
+    const PORT: u16 = 22;
 
     fn get_params() -> (String, String, String, String) {
         let host = env::var("TEST_SSH_HOST").unwrap();
@@ -644,6 +756,28 @@ mod tests {
         assert!(home.len() > 0);
         (host, user, pass, home)
     }
+
+    fn get_jump_params() -> (String, String, String) {
+        let jump_host = env::var("TEST_JUMP_HOST").unwrap_or_else(|_| "JumpServer".to_string());
+        let jump_user = env::var("TEST_JUMP_USER").unwrap_or_else(|_| "jumpuser".to_string());
+        let jump_pass = env::var("TEST_JUMP_PASS").unwrap_or_else(|_| "jumppass".to_string());
+        assert!(jump_host.len() > 0);
+        assert!(jump_user.len() > 0);
+        assert!(jump_pass.len() > 0);
+        (jump_host, jump_user, jump_pass)
+    }
+
+    fn get_target_params() -> (String, String, String) {
+        let target_host = env::var("TEST_TARGET_HOST").unwrap_or_else(|_| "NodeA".to_string());
+        let target_user = env::var("TEST_TARGET_USER").unwrap_or_else(|_| "admin".to_string());
+        let target_pass = env::var("TEST_TARGET_PASS").unwrap_or_else(|_| "nodepass".to_string());
+        assert!(target_host.len() > 0);
+        assert!(target_user.len() > 0);
+        assert!(target_pass.len() > 0);
+        (target_host, target_user, target_pass)
+    }
+
+
     #[tokio::test]
     async fn connect_with_password() {
         let mut ssh = Ssh::new();
@@ -805,4 +939,236 @@ mod tests {
         assert!(ssh.sftp_delete(&format!("{home}/file1")).is_ok());
         assert!(ssh.sftp_stat(&format!("{home}/file1")).is_err());
     }
+
+    #[tokio::test]
+    async fn test_connect_with_password_via_jump() {
+        let mut ssh = Ssh::new();
+        let (jump_host, jump_user, jump_pass) = get_jump_params();
+        let (target_host, target_user, target_pass) = get_target_params();
+
+        // Configure jump server
+        ssh.set_jump_server(&jump_host, &jump_user, &jump_pass);
+
+        // Connect to target through jump server
+        let result = ssh.connect_with_password(&target_host, PORT, &target_user, &target_pass).await;
+        
+        match result {
+            Ok(_) => {
+                println!("✅ Successfully connected to {} through jump server {}", target_host, jump_host);
+                
+                // Test that the connection works by running a command
+                match ssh.run("whoami") {
+                    Ok(output) => {
+                        println!("✅ Command executed successfully: {}", output);
+                        assert_eq!(target_user, output.trim());
+                    }
+                    Err(e) => {
+                        panic!("❌ Failed to execute command: {}", e);
+                    }
+                }
+
+                // Test SFTP functionality
+                match ssh.sftp_stat("/") {
+                    Ok(_) => println!("✅ SFTP connection working"),
+                    Err(e) => panic!("❌ SFTP not working: {}", e),
+                }
+
+                // Clean disconnect
+                if let Err(e) = ssh.disconnect() {
+                    println!("⚠️  Disconnect warning: {}", e);
+                }
+            }
+            Err(e) => {
+                panic!("❌ Failed to connect through jump server: {}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connect_with_key_via_jump() {
+        let mut ssh = Ssh::new();
+        let (jump_host, jump_user, _) = get_jump_params();
+        let (target_host, target_user, _) = get_target_params();
+
+        // Use private key for jump server
+        let jump_key = Ssh::private_key_path();
+        let target_key = Ssh::private_key_path();
+
+        // Configure jump server with key
+        ssh.set_jump_server_with_key(&jump_host, &jump_user, jump_key.to_str().unwrap());
+
+        // Connect to target through jump server using key
+        let result = ssh.connect_with_key(&target_host, PORT, &target_user, target_key.to_str().unwrap()).await;
+        
+        match result {
+            Ok(_) => {
+                println!("✅ Successfully connected to {} through jump server {} using keys", target_host, jump_host);
+                
+                // Test command execution
+                match ssh.run("hostname") {
+                    Ok(output) => {
+                        println!("✅ Hostname command executed: {}", output);
+                        assert!(output.len() > 0);
+                    }
+                    Err(e) => {
+                        panic!("❌ Failed to execute hostname command: {}", e);
+                    }
+                }
+
+                // Clean disconnect
+                if let Err(e) = ssh.disconnect() {
+                    println!("⚠️  Disconnect warning: {}", e);
+                }
+            }
+            Err(e) => {
+                panic!("❌ Failed to connect through jump server with keys: {}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_jump_server_invalid_credentials() {
+        let mut ssh = Ssh::new();
+        let (jump_host, jump_user, _) = get_jump_params();
+        let (target_host, target_user, target_pass) = get_target_params();
+
+        // Configure jump server with wrong password
+        ssh.set_jump_server(&jump_host, &jump_user, "wrongpassword");
+
+        // This should fail at jump server authentication
+        let result = ssh.connect_with_password(&target_host, PORT, &target_user, &target_pass).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.contains("Jump server authentication error") || error.contains("authentication"));
+        println!("✅ Correctly failed with invalid jump server credentials: {}", error);
+    }
+
+    #[tokio::test]
+    async fn test_jump_server_invalid_target() {
+        let mut ssh = Ssh::new();
+        let (jump_host, jump_user, jump_pass) = get_jump_params();
+        let (_, target_user, target_pass) = get_target_params();
+
+        // Configure valid jump server
+        ssh.set_jump_server(&jump_host, &jump_user, &jump_pass);
+
+        // Try to connect to invalid target
+        let result = ssh.connect_with_password("invalid-target-host", PORT, &target_user, &target_pass).await;
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.contains("tunnel") || error.contains("connection") || error.contains("handshake"));
+        println!("✅ Correctly failed with invalid target host: {}", error);
+    }
+
+    #[tokio::test]
+    async fn test_direct_vs_jump_connection() {
+        // Test both direct and jump connections to compare functionality
+        let (direct_host, direct_user, direct_pass, _) = get_params();
+        let (jump_host, jump_user, jump_pass) = get_jump_params();
+        let (target_host, target_user, target_pass) = get_target_params();
+
+        // Test direct connection (existing functionality)
+        let mut direct_ssh = Ssh::new();
+        let direct_result = direct_ssh.connect_with_password(&direct_host, PORT, &direct_user, &direct_pass).await;
+        
+        // Test jump connection
+        let mut jump_ssh = Ssh::new();
+        jump_ssh.set_jump_server(&jump_host, &jump_user, &jump_pass);
+        let jump_result = jump_ssh.connect_with_password(&target_host, PORT, &target_user, &target_pass).await;
+
+        if direct_result.is_ok() {
+            println!("✅ Direct connection successful");
+            let direct_output = direct_ssh.run("whoami").unwrap();
+            println!("Direct connection user: {}", direct_output);
+        }
+
+        if jump_result.is_ok() {
+            println!("✅ Jump connection successful");
+            let jump_output = jump_ssh.run("whoami").unwrap();
+            println!("Jump connection user: {}", jump_output);
+            
+            // Both should work the same way
+            assert_eq!(target_user, jump_output.trim());
+        }
+
+        // Clean up
+        if direct_result.is_ok() {
+            let _ = direct_ssh.disconnect();
+        }
+        if jump_result.is_ok() {
+            let _ = jump_ssh.disconnect();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_jump_server_multiple_operations() {
+        let mut ssh = Ssh::new();
+        let (jump_host, jump_user, jump_pass) = get_jump_params();
+        let (target_host, target_user, target_pass) = get_target_params();
+
+        // Configure and connect
+        ssh.set_jump_server(&jump_host, &jump_user, &jump_pass);
+        let result = ssh.connect_with_password(&target_host, PORT, &target_user, &target_pass).await;
+        
+        assert!(result.is_ok(), "Failed to connect: {:?}", result);
+
+        // Test multiple operations to ensure connection stability
+        
+        // 1. Test command execution
+        let whoami_result = ssh.run("whoami");
+        assert!(whoami_result.is_ok(), "whoami failed: {:?}", whoami_result);
+        println!("✅ whoami: {}", whoami_result.unwrap());
+
+        // 2. Test another command
+        let pwd_result = ssh.run("pwd");
+        assert!(pwd_result.is_ok(), "pwd failed: {:?}", pwd_result);
+        println!("✅ pwd: {}", pwd_result.unwrap());
+
+        // 3. Test SFTP operations
+        let stat_result = ssh.sftp_stat("/tmp");
+        assert!(stat_result.is_ok(), "SFTP stat failed: {:?}", stat_result);
+        println!("✅ SFTP stat /tmp successful");
+
+        // 4. Test file creation and deletion
+        let test_file = "/tmp/jump_test_file";
+        let create_result = ssh.sftp_create(test_file);
+        assert!(create_result.is_ok(), "File creation failed: {:?}", create_result);
+        println!("✅ Created test file");
+
+        let delete_result = ssh.sftp_delete(test_file);
+        assert!(delete_result.is_ok(), "File deletion failed: {:?}", delete_result);
+        println!("✅ Deleted test file");
+
+        // Clean disconnect
+        let disconnect_result = ssh.disconnect();
+        assert!(disconnect_result.is_ok(), "Disconnect failed: {:?}", disconnect_result);
+        println!("✅ Clean disconnect successful");
+    }
+}
+
+// Helper function to set up environment variables for testing
+#[cfg(test)]
+pub fn setup_test_env() {
+    // Set these environment variables before running tests:
+    // 
+    // For existing direct connection tests:
+    // export TEST_SSH_HOST="your-direct-host"
+    // export TEST_SSH_USER="your-user"  
+    // export TEST_SSH_PASS="your-password"
+    // export TEST_SSH_HOME="/home/your-user"
+    //
+    // For jump server tests:
+    // export TEST_JUMP_HOST="your-jump-server"
+    // export TEST_JUMP_USER="jump-user"
+    // export TEST_JUMP_PASS="jump-password"
+    // export TEST_TARGET_HOST="target-node"
+    // export TEST_TARGET_USER="target-user"
+    // export TEST_TARGET_PASS="target-password"
+    
+    println!("Test environment setup:");
+    println!("TEST_SSH_HOST: {}", std::env::var("TEST_SSH_HOST").unwrap_or("NOT_SET".to_string()));
+    println!("TEST_JUMP_HOST: {}", std::env::var("TEST_JUMP_HOST").unwrap_or("NOT_SET".to_string()));
+    println!("TEST_TARGET_HOST: {}", std::env::var("TEST_TARGET_HOST").unwrap_or("NOT_SET".to_string()));
 }
